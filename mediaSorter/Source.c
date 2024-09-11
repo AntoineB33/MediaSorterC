@@ -9,13 +9,19 @@ typedef struct {
     int ulteriors_size; // Size of the 'ulteriors' list
     int nbPost;         // Count of integers that must be placed before this
     int highest;        // Highest placement allowed for this integer
+	int lowest;		 // Lowest placement allowed for this integer
 } Node;
 
-// Define a structure for the highests array
 typedef struct {
-    int integer; // The integer that must be placed at this index
-    int placed;  // Flag indicating if the integer has been placed
-} Highest;
+    int type;
+    int pt;
+} Rule;
+
+typedef struct {
+    int integer;
+    int lowest;
+    int highest;
+} Reservation;
 
 // Utility function to check if all integers have been sorted
 int all_sorted(int* sorted, int n) {
@@ -28,7 +34,7 @@ int all_sorted(int* sorted, int n) {
 }
 
 // Recursive function to try all possible ways to sort the integers
-void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Highest* highests) {
+void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Rule** rules, int* ruleSizes, int* ruleCapacities, int** reservations, int* reservationSize, int* reservationsCapacity, int* reservationSizes, int* reservationsCapacities) {
     // If all integers are sorted, print the current result
     if (depth == n) {
         for (int i = 0; i < n; i++) {
@@ -39,7 +45,7 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Highest* 
     }
 
     // Check if there is an integer that must be placed at the current index according to `highests`
-    if (highests[depth].integer != -1 && !highests[depth].placed) {
+    if (!highests[depth].placed) {
         int i = highests[depth].integer;
         if (!sorted[i] && nodes[i].nbPost == 0) {
             // Place this integer
@@ -95,6 +101,13 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Highest* 
     }
 }
 
+void increaseCapacity(void* list, int* listSize, int* listCapacity, size_t elementSize) {
+    if (*listSize == *listCapacity) {
+        *listCapacity = *listSize;
+        list = realloc(list, *listSize * elementSize);
+    }
+}
+
 int main() {
     int n = 4; // Define the number of integers to sort
 
@@ -129,26 +142,88 @@ int main() {
     nodes[3].nbPost = 1; // 3 must come after 1
     nodes[3].highest = 2; // 3 must be placed at index 3 or earlier
 
-    int* sorted = (int*)calloc(n, sizeof(int));  // Keep track of sorted integers
-    int* result = (int*)malloc(n * sizeof(int)); // Store the current result
+    int* sorted = calloc(n, sizeof(int));  // Keep track of sorted integers
+    int* result = malloc(n * sizeof(int)); // Store the current result
 
-    // Initialize the highests array
-    Highest* highests = (Highest*)malloc(n * sizeof(Highest));
-    for (int i = 0; i < n; i++) {
-        highests[i].integer = -1;  // Default to no specific integer required
-        highests[i].placed = 0;
-    }
+	Rule** rules = malloc(sizeof(Rule*));
+	int* ruleSizes = malloc(sizeof(int));
+	int* ruleCapacities = malloc(sizeof(int));
+    Reservation** reservations = NULL;
+    int reservationSize = 0;
+    int reservationsCapacity = 0;
+    int* reservationSizes = NULL;
+    int* reservationsCapacities = NULL;
+
 
     // Populate the highests array based on the `highest` attribute of each node
     for (int i = 0; i < n; i++) {
         if (nodes[i].highest < n - 1) {
-            highests[nodes[i].highest].integer = i;
+            int highest = nodes[i].highest;
+            int found = 0;
+            for (int j = 0; j < ruleSizes[highest]; j++) {
+                if (rules[highest][j].type == 0) {
+					int pt = rules[highest][j].pt;
+                    reservationSizes[pt]++;
+					increaseCapacity(reservations[pt], reservationSizes[pt], reservationsCapacities[pt], sizeof(Reservation));
+                    int newPt = pt;
+                    int m = highest - 1;
+                    while(1) {
+                        found = 0;
+                        for (int n = 0; n < ruleSizes[m]; n++) {
+                            if (rules[m][n].type == 0) {
+                                int pt2 = rules[m][n].pt;
+								if (pt2 != pt) {
+                                    for (int q = highest; q >= m; q--) {
+										for (int r = 0; r < ruleSizes[q]; r++) {
+											if (rules[q][r].type == 0) {
+												rules[q][r].pt = pt2;
+											}
+										}
+									}
+                                    reservationSizes[pt2] += reservationSizes[pt] + 1;
+                                    increaseCapacity(reservations[pt2], reservationSizes[pt2], reservationsCapacities[pt2], sizeof(Reservation));
+
+                                    // Allocate memory for the new array
+                                    int* newList = malloc((reservationSizes[pt2]) * sizeof(int));
+
+                                    // Copy the first list to the new list
+                                    memcpy(newList, reservations[pt2], reservationSizes[pt] * sizeof(int));
+
+                                    // Copy the second list to the new list (after the first list)
+                                    memcpy(newList + reservationSizes[pt2], reservations[pt], reservationSizes[pt] * sizeof(int));
+
+									reservations[pt2] = newList;
+									newPt = pt2;
+                                    m -= reservationSizes[pt];
+									reservationSizes[pt] = 0;
+								}
+								found = 1;
+								break;
+							}
+						}
+						if (!found) {
+                            highest = m;
+							break;
+						}
+                        m--;
+					}
+                    found = 1;
+                    break;
+                }
+            }
+            ruleSizes[i]++;
+            increaseCapacity(rules[highest], ruleSizes[highest], ruleCapacities[highest], sizeof(Rule));
+            rules[highest][ruleSizes[highest] - 1].type = 0;
+            rules[highest][ruleSizes[highest] - 1].pt = reservationSize;
+            if (!found) {
+                increaseCapacity(reservations, reservationSize, reservationsCapacity, sizeof(Reservation*));
+            }
         }
     }
 
     // Try all possible ways to sort the integers
     printf("All possible valid orderings:\n");
-    try_sort(nodes, n, sorted, 0, result, highests);
+    try_sort(nodes, n, sorted, 0, result, rules, ruleSizes, ruleCapacities, reservations, reservationSize, reservationsCapacity, reservationSizes, reservationsCapacities);
 
     // Free allocated memory
     for (int i = 0; i < n; i++) {
