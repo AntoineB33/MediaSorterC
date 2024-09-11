@@ -19,6 +19,7 @@ typedef struct {
 
 typedef struct {
     int integer;
+    int placed;
     int lowest;
     int highest;
 } Reservation;
@@ -34,7 +35,7 @@ int all_sorted(int* sorted, int n) {
 }
 
 // Recursive function to try all possible ways to sort the integers
-void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Rule** rules, int* ruleSizes, int* ruleCapacities, int** reservations, int* reservationSize, int* reservationsCapacity, int* reservationSizes, int* reservationsCapacities) {
+void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Rule** rules, int* ruleSizes, int* ruleCapacities, Reservation** reservations, int* reservationSize, int* reservationsCapacity, int* reservationSizes, int* reservationsCapacities) {
     // If all integers are sorted, print the current result
     if (depth == n) {
         for (int i = 0; i < n; i++) {
@@ -44,7 +45,37 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Rule** ru
         return;
     }
 
-    // Check if there is an integer that must be placed at the current index according to `highests`
+    for (int j = 0; j < ruleSizes[depth]; j++) {
+        if (rules[depth][j].type == 0) {
+			int pt = rules[depth][j].pt;
+            for (int m = 0; m < reservationSizes[pt]; m++) {
+				if (!reservations[pt][m].placed) {
+					int i = reservations[pt][m].integer;
+					if (!sorted[i]) {
+						// Place this integer
+						sorted[i] = 1;
+						result[depth] = i;
+						reservations[pt][m].placed = 1;
+
+						// Update the nbPost of all integers that come after the current one
+						for (int k = 0; k < nodes[i].ulteriors_size; k++) {
+							nodes[nodes[i].ulteriors[k]].nbPost--;
+						}
+
+						// Recur to place the next integer
+						try_sort(nodes, n, sorted, depth + 1, result, rules, ruleSizes, ruleCapacities, reservations, reservationSize, reservationsCapacity, reservationSizes, reservationsCapacities);
+
+						// Backtrack: unplace this integer
+						for (int k = 0; k < nodes[i].ulteriors_size; k++) {
+							nodes[nodes[i].ulteriors[k]].nbPost++;
+						}
+						sorted[i] = 0;
+						reservations[pt][m].placed = 0;
+					}
+				}
+            }
+        }
+    }
     if (!highests[depth].placed) {
         int i = highests[depth].integer;
         if (!sorted[i] && nodes[i].nbPost == 0) {
@@ -101,10 +132,10 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Rule** ru
     }
 }
 
-void increaseCapacity(void* list, int* listSize, int* listCapacity, size_t elementSize) {
-    if (*listSize == *listCapacity) {
-        *listCapacity = *listSize;
-        list = realloc(list, *listSize * elementSize);
+void increaseCapacity(void* list, int listSize, int* listCapacity, size_t elementSize) {
+    if (listSize == *listCapacity) {
+        *listCapacity = listSize;
+        list = realloc(list, listSize * elementSize);
     }
 }
 
@@ -159,13 +190,13 @@ int main() {
     for (int i = 0; i < n; i++) {
         if (nodes[i].highest < n - 1) {
             int highest = nodes[i].highest;
+            int newPt = reservationSize - 1;
             int found = 0;
             for (int j = 0; j < ruleSizes[highest]; j++) {
                 if (rules[highest][j].type == 0) {
 					int pt = rules[highest][j].pt;
                     reservationSizes[pt]++;
 					increaseCapacity(reservations[pt], reservationSizes[pt], reservationsCapacities[pt], sizeof(Reservation));
-                    int newPt = pt;
                     int m = highest - 1;
                     while(1) {
                         found = 0;
@@ -216,8 +247,16 @@ int main() {
             rules[highest][ruleSizes[highest] - 1].type = 0;
             rules[highest][ruleSizes[highest] - 1].pt = reservationSize;
             if (!found) {
+                reservationSize++;
+                if (reservationSize == reservationsCapacity) {
+                    reservationSizes = realloc(reservationSizes, reservationSize * sizeof(Reservation*));
+                }
                 increaseCapacity(reservations, reservationSize, reservationsCapacity, sizeof(Reservation*));
             }
+			reservations[newPt][reservationSizes[newPt] - 1].integer = i;
+			reservations[newPt][reservationSizes[newPt] - 1].placed = 0;
+			reservations[newPt][reservationSizes[newPt] - 1].lowest = nodes[i].lowest;
+			reservations[newPt][reservationSizes[newPt] - 1].highest = nodes[i].highest;
         }
     }
 
