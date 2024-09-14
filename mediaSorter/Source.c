@@ -13,16 +13,55 @@ typedef struct {
 } Node;
 
 typedef struct {
-    int type;
-    int pt;
-} Rule;
+    int resListInd;
+    int startInd;
+} ReservationRule;
 
 typedef struct {
-    int integer;
-    int placed;
-    int lowest;
-    int highest;
-} Reservation;
+    void* data;       // Pointer to the array (generic list)
+    size_t size;      // Number of elements in the list
+    size_t capacity;  // Capacity of the list
+    size_t elemSize;  // Size of each element
+	int lastElment;   // Index of the last element
+} GenericList;
+
+
+// Function to initialize the list
+void initList(GenericList* list, size_t elemSize, size_t initialCapacity) {
+    list->data = malloc(initialCapacity * elemSize); // Allocate memory for the generic array
+    if (list->data == NULL) {
+        printf("Memory allocation failed\n");
+        exit(1);
+    }
+    list->size = 0;
+    list->capacity = initialCapacity;
+    list->elemSize = elemSize;
+	list->lastElment = 0;
+}
+
+// Function to add an element to the list
+void addElement(GenericList* list, void* element) {
+    // Check if the list is full and resize if needed
+    if (list->size == list->capacity) {
+        list->capacity *= 2;
+        list->data = realloc(list->data, list->capacity * list->elemSize);
+        if (list->data == NULL) {
+            printf("Memory reallocation failed\n");
+            exit(1);
+        }
+    }
+    // Copy the new element into the list
+    void* destination = (char*)list->data + (list->size * list->elemSize);
+    memcpy(destination, element, list->elemSize);
+    list->size++;
+}
+
+// Function to free the list
+void freeList(GenericList* list) {
+    free(list->data);
+    list->size = 0;
+    list->capacity = 0;
+}
 
 // Utility function to check if all integers have been sorted
 int all_sorted(int* sorted, int n) {
@@ -132,10 +171,109 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, Rule** ru
     }
 }
 
-void increaseCapacity(void* list, int listSize, int* listCapacity, size_t elementSize) {
-    if (listSize == *listCapacity) {
-        *listCapacity = listSize;
-        list = realloc(list, listSize * elementSize);
+void update(Node* nodes, int n, int i, ReservationRule* reservationRules, GenericList* reservations) {
+    if (nodes[i].highest < n - 1) {
+        int highest = nodes[i].highest;
+        int ind = 0;
+        int resGroupInd = reservationRules[highest].resGroupInd;
+        if (resGroupInd == -1) {
+            reservationRules[highest].resGroupInd = reservations->size;
+			reservationRules[highest].resListInd = 0;
+            reservationRules[highest].startInd = 0;
+            GenericList reservationList;
+			initList(&reservationList, sizeof(int), 1);
+			addElement(&reservationList, &i);
+            GenericList reservationGroup;
+			initList(&reservationGroup, sizeof(GenericList), 1);
+			addElement(&reservationGroup, &reservationList);
+			addElement(reservations, &reservationGroup);
+        }
+        else {
+            int newresGroupInd = resGroupInd;
+            GenericList* reservationGroup = (GenericList*)reservations->data;
+            GenericList* reservationList = &reservationGroup[newresGroupInd];
+            int* integers = (int*)reservationList->data;
+			int resListIndToSet = -1;
+            if (highest != nodes[integers[0]].highest) {
+                GenericList reservationList;
+                initList(&reservationList, sizeof(int), 1);
+                addElement(&reservationList, &i);
+                GenericList* reservationGroup = (GenericList*)reservations->data;
+                if (reservationRules[highest].resListInd == -1) {
+                    reservationGroup->lastElment = reservationGroup->size;
+                    resListIndToSet = -1;
+                    newresGroupInd = reservationRules[highest - 1].resGroupInd;
+                }
+                addElement(&reservationGroup, &reservationList);
+            }
+            while (newresGroupInd != -1) {
+                reservationGroup = (GenericList*)reservations->data;
+                reservationList = &reservationGroup[reservationGroup->lastElment];
+                integers = (int*)reservationList->data;
+                highest = nodes[integers[0]].highest - reservationList->size + 1;
+				resGroupInd = newresGroupInd;
+                while ((newresGroupInd = reservationRules[highest - 1].resGroupInd) == resGroupInd) {
+                    highest--;
+                }
+            }
+
+
+
+
+
+            reservationSizes[pt]++;
+            increaseCapacity(reservations[pt], reservationSizes[pt], reservationsCapacities[pt], sizeof(Reservation*));
+            int m = highest - 1;
+            while (1) {
+                found = 0;
+                for (int n = 0; n < ruleSizes[m]; n++) {
+                    if (rules[m][n].type == 0) {
+                        int pt2 = rules[m][n].pt;
+                        if (pt2 != pt) {
+                            for (int q = highest; q >= m; q--) {
+                                for (int r = 0; r < ruleSizes[q]; r++) {
+                                    if (rules[q][r].type == 0) {
+                                        rules[q][r].pt = pt2;
+                                    }
+                                }
+                            }
+                            increaseCapacity(reservations[pt2], reservationSizes[pt] + 1, reservationsCapacities[pt2], sizeof(Reservation));
+                            reservationInd[i] = reservationSizes[pt2] - 1;
+                            reservationSizes[pt2] += reservationSizes[pt] + 1;
+                            // Copying elements of list2 into list1
+                            memcpy(reservations[pt2] + reservationSizes[pt2], reservations[pt], reservationSizes[pt] * sizeof(int));
+                            newPt = pt2;
+                            m -= reservationSizes[pt];
+                            reservationSizes[pt] = 0;
+                        }
+                        found = 1;
+                        break;
+                    }
+                }
+                if (!found) {
+                    highest = m;
+                    break;
+                }
+                m--;
+            }
+            found = 1;
+            break;
+        }
+        ruleSizes[i]++;
+        increaseCapacity(rules[highest], ruleSizes[highest], ruleCapacities[highest], sizeof(Rule));
+        rules[highest][ruleSizes[highest] - 1].type = 0;
+        rules[highest][ruleSizes[highest] - 1].pt = reservationSize;
+        if (!found) {
+            reservationSize++;
+            if (reservationSize == reservationsCapacity) {
+                reservationSizes = realloc(reservationSizes, reservationSize * sizeof(Reservation*));
+            }
+            increaseCapacity(reservations, reservationSize, reservationsCapacity, sizeof(Reservation*));
+        }
+        reservations[newPt][reservationSizes[newPt] - 1].integer = i;
+        reservations[newPt][reservationSizes[newPt] - 1].placed = 0;
+        reservations[newPt][reservationSizes[newPt] - 1].lowest = nodes[i].lowest;
+        reservations[newPt][reservationSizes[newPt] - 1].highest = nodes[i].highest;
     }
 }
 
@@ -176,88 +314,17 @@ int main() {
     int* sorted = calloc(n, sizeof(int));  // Keep track of sorted integers
     int* result = malloc(n * sizeof(int)); // Store the current result
 
-	Rule** rules = malloc(sizeof(Rule*));
-	int* ruleSizes = malloc(sizeof(int));
-	int* ruleCapacities = malloc(sizeof(int));
-    Reservation** reservations = NULL;
-    int reservationSize = 0;
-    int reservationsCapacity = 0;
-    int* reservationSizes = NULL;
-    int* reservationsCapacities = NULL;
+    GenericList reservations;
+    reservations.size = 0;
+    reservations.capacity = 0;
+	reservations.elemSize = sizeof(GenericList);
+	ReservationRule* reservationRules = malloc((n - 1) * sizeof(ReservationRule));
+
 
 
     // Populate the highests array based on the `highest` attribute of each node
     for (int i = 0; i < n; i++) {
-        if (nodes[i].highest < n - 1) {
-            int highest = nodes[i].highest;
-            int newPt = reservationSize - 1;
-            int found = 0;
-            for (int j = 0; j < ruleSizes[highest]; j++) {
-                if (rules[highest][j].type == 0) {
-					int pt = rules[highest][j].pt;
-                    reservationSizes[pt]++;
-					increaseCapacity(reservations[pt], reservationSizes[pt], reservationsCapacities[pt], sizeof(Reservation));
-                    int m = highest - 1;
-                    while(1) {
-                        found = 0;
-                        for (int n = 0; n < ruleSizes[m]; n++) {
-                            if (rules[m][n].type == 0) {
-                                int pt2 = rules[m][n].pt;
-								if (pt2 != pt) {
-                                    for (int q = highest; q >= m; q--) {
-										for (int r = 0; r < ruleSizes[q]; r++) {
-											if (rules[q][r].type == 0) {
-												rules[q][r].pt = pt2;
-											}
-										}
-									}
-                                    reservationSizes[pt2] += reservationSizes[pt] + 1;
-                                    increaseCapacity(reservations[pt2], reservationSizes[pt2], reservationsCapacities[pt2], sizeof(Reservation));
-
-                                    // Allocate memory for the new array
-                                    int* newList = malloc((reservationSizes[pt2]) * sizeof(int));
-
-                                    // Copy the first list to the new list
-                                    memcpy(newList, reservations[pt2], reservationSizes[pt] * sizeof(int));
-
-                                    // Copy the second list to the new list (after the first list)
-                                    memcpy(newList + reservationSizes[pt2], reservations[pt], reservationSizes[pt] * sizeof(int));
-
-									reservations[pt2] = newList;
-									newPt = pt2;
-                                    m -= reservationSizes[pt];
-									reservationSizes[pt] = 0;
-								}
-								found = 1;
-								break;
-							}
-						}
-						if (!found) {
-                            highest = m;
-							break;
-						}
-                        m--;
-					}
-                    found = 1;
-                    break;
-                }
-            }
-            ruleSizes[i]++;
-            increaseCapacity(rules[highest], ruleSizes[highest], ruleCapacities[highest], sizeof(Rule));
-            rules[highest][ruleSizes[highest] - 1].type = 0;
-            rules[highest][ruleSizes[highest] - 1].pt = reservationSize;
-            if (!found) {
-                reservationSize++;
-                if (reservationSize == reservationsCapacity) {
-                    reservationSizes = realloc(reservationSizes, reservationSize * sizeof(Reservation*));
-                }
-                increaseCapacity(reservations, reservationSize, reservationsCapacity, sizeof(Reservation*));
-            }
-			reservations[newPt][reservationSizes[newPt] - 1].integer = i;
-			reservations[newPt][reservationSizes[newPt] - 1].placed = 0;
-			reservations[newPt][reservationSizes[newPt] - 1].lowest = nodes[i].lowest;
-			reservations[newPt][reservationSizes[newPt] - 1].highest = nodes[i].highest;
-        }
+        update
     }
 
     // Try all possible ways to sort the integers
@@ -271,7 +338,6 @@ int main() {
     free(nodes);
     free(sorted);
     free(result);
-    free(highests);
 
     return 0;
 }
