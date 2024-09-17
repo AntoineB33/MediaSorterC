@@ -14,10 +14,16 @@ typedef struct {
 } Node;
 
 typedef struct {
+    int all;
+    int resList;
+} ReservationRule;
+
+typedef struct {
     GenericList data;
+    int all;
     int out;
     int prevListInd;
-	int nextListInd;
+    int nextListInd;
 } ReservationList;
 
 typedef struct {
@@ -57,6 +63,27 @@ void addElement(GenericList* list, void* element) {
     list->size++;
 }
 
+// Function to remove an integer from the list
+void removeElement(GenericList* list, int element) {
+    // Iterate through the list to find the element
+    for (size_t i = 0; i < list->size; i++) {
+        int* currentElement = (int*)((char*)list->data + i * list->elemSize);
+        if (*currentElement == element) {
+            // Element found, now shift the remaining elements
+            for (size_t j = i; j < list->size - 1; j++) {
+                void* src = (char*)list->data + (j + 1) * list->elemSize;
+                void* dst = (char*)list->data + j * list->elemSize;
+                memcpy(dst, src, list->elemSize);
+            }
+            list->size--;  // Reduce the size after removing the element
+            return;        // Exit after removing the element
+        }
+    }
+
+    // If the element is not found, print a message
+    printf("Element not found in the list\n");
+}
+
 // Function to free the list
 void freeList(GenericList* list) {
     free(list->data);
@@ -75,7 +102,7 @@ int all_sorted(int* sorted, int n) {
 }
 
 // Recursive function to try all possible ways to sort the integers
-void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, ) {
+void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, int* reservationRules, ReservationList* reservationLists) {
     // If all integers are sorted, print the current result
     if (depth == n) {
         for (int i = 0; i < n; i++) {
@@ -85,35 +112,33 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, ) {
         return;
     }
 
-    for (int j = 0; j < ruleSizes[depth]; j++) {
-        if (rules[depth][j].type == 0) {
-			int pt = rules[depth][j].pt;
-            for (int m = 0; m < reservationSizes[pt]; m++) {
-				if (!reservations[pt][m].placed) {
-					int i = reservations[pt][m].integer;
-					if (!sorted[i]) {
-						// Place this integer
-						sorted[i] = 1;
-						result[depth] = i;
-						reservations[pt][m].placed = 1;
+    if (reservationRules[depth] != -1) {
+		int pt = rules[depth][j].pt;
+        for (int m = 0; m < reservationSizes[pt]; m++) {
+			if (!reservations[pt][m].placed) {
+				int i = reservations[pt][m].integer;
+				if (!sorted[i]) {
+					// Place this integer
+					sorted[i] = 1;
+					result[depth] = i;
+					reservations[pt][m].placed = 1;
 
-						// Update the nbPost of all integers that come after the current one
-						for (int k = 0; k < nodes[i].ulteriors_size; k++) {
-							nodes[nodes[i].ulteriors[k]].nbPost--;
-						}
-
-						// Recur to place the next integer
-						try_sort(nodes, n, sorted, depth + 1, result, rules, ruleSizes, ruleCapacities, reservations, reservationSize, reservationsCapacity, reservationSizes, reservationsCapacities);
-
-						// Backtrack: unplace this integer
-						for (int k = 0; k < nodes[i].ulteriors_size; k++) {
-							nodes[nodes[i].ulteriors[k]].nbPost++;
-						}
-						sorted[i] = 0;
-						reservations[pt][m].placed = 0;
+					// Update the nbPost of all integers that come after the current one
+					for (int k = 0; k < nodes[i].ulteriors_size; k++) {
+						nodes[nodes[i].ulteriors[k]].nbPost--;
 					}
+
+					// Recur to place the next integer
+					try_sort(nodes, n, sorted, depth + 1, result, rules, ruleSizes, ruleCapacities, reservations, reservationSize, reservationsCapacity, reservationSizes, reservationsCapacities);
+
+					// Backtrack: unplace this integer
+					for (int k = 0; k < nodes[i].ulteriors_size; k++) {
+						nodes[nodes[i].ulteriors[k]].nbPost++;
+					}
+					sorted[i] = 0;
+					reservations[pt][m].placed = 0;
 				}
-            }
+			}
         }
     }
     if (!highests[depth].placed) {
@@ -172,45 +197,67 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, ) {
     }
 }
 
-//void update(Node* nodes, int n, int i, int* reservationRules, ReservationList* reservationLists) {
-//    if (nodes[i].highest < n - 1) {
-//        int highest = nodes[i].highest;
-//        int ind = 0;
-//        int resListInd = reservationRules[highest];
-//        if (resListInd == -1) {
-//            reservationLists[highest].out = 1;
-//            reservationLists[highest].prevListInd = highest - 1;
-//            addElement(&(reservationLists[highest].data), &i);
-//        }
-//        else {
-//            int resThatWasThere = reservationRules[highest];
-//            if (resThatWasThere != highest) {
-//                reservationLists[highest].prevListInd = reservationLists[resThatWasThere].prevListInd;
-//                reservationLists[resThatWasThere].prevListInd = highest;
-//				reservationLists[highest].nextListInd = resThatWasThere;
-//			}
-//			else {
-//				reservationLists[highest].prevListInd = highest - 1;
-//				reservationLists[highest].out = 1;
-//			}
-//            addElement(&(reservationLists[highest].data), &i);
-//            int placeInd = reservationGroups[groupInd].headInd - 1;
-//            int nextInd;
-//            while ((nextInd = reservationRules[placeInd]) != -1) {
-//                int groupInd = reservationLists[nextInd].resGroupInd;
-//                int fstListInd = reservationGroups[groupInd].fstListInd;
-//                reservationLists[fstListInd].prevListInd = nextInd;
-//                reservationGroups[groupInd].fstListInd = placeInd;
-//            }
-//			reservationGroups[groupInd].headInd = placeInd;
-//            int resThatWasThere = reservationRules[placeInd - 1];
-//            if (resThatWasThere == highest) {
-//                reservationRules[placeInd] = highest;
-//                while
-//            }
-//        }
-//    }
-//}
+void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
+    if (nodes[i].highest < n - 1) {
+        int highest = nodes[i].highest;
+        int resListInd = reservationRules[highest].resList;
+        if (resListInd == -1) {
+            reservationLists[highest].out = 1;
+            reservationLists[highest].prevListInd = highest - 1;
+			reservationLists[highest].nextListInd = -1;
+            reservationLists[highest].all = 0;
+            addElement(&(reservationLists[highest].data), &i);
+        }
+        else {
+            int resThatWasThere = reservationRules[highest].resList;
+            if (resThatWasThere != highest) {
+                reservationLists[highest].prevListInd = reservationLists[resThatWasThere].prevListInd;
+                reservationLists[resThatWasThere].prevListInd = highest;
+                reservationLists[highest].nextListInd = resThatWasThere;
+			}
+            addElement(&(reservationLists[highest].data), &i);
+            int placeInd = highest;
+            int placeIndPrev;
+            do{
+                do{
+					placeIndPrev = placeInd;
+                    placeInd = reservationLists[placeIndPrev].prevListInd;
+                } while (reservationLists[placeIndPrev].out == 0);
+				if (reservationRules[placeInd].resList == -1) {
+					break;
+				}
+				reservationLists[placeIndPrev].prevListInd = placeInd;
+                reservationLists[placeIndPrev].out = 0;
+                reservationLists[placeInd].nextListInd = placeIndPrev;
+            } while (1);
+			reservationRules[placeInd].resList = placeIndPrev;
+            reservationRules[placeInd].all = (placeIndPrev != highest);
+        }
+    }
+}
+
+void chosen(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
+	if (nodes[i].highest < n - 1) {
+		int highest = nodes[i].highest;
+        int placeInd = highest;
+        int placeIndPrev;
+        if (reservationLists[highest].data.size > highest - reservationLists[highest].prevListInd) {
+            do {
+                placeIndPrev = placeInd;
+                placeInd = reservationLists[placeIndPrev].prevListInd;
+            } while (reservationLists[placeIndPrev].out == 0);
+            reservationRules[placeInd].resList = -1;
+			reservationLists[placeIndPrev].prevListInd++;
+			removeElement(&(reservationLists[highest].data), i);
+			if (reservationRules[placeInd - 1].all == 0) {
+
+			}
+		}
+		else {
+
+		}
+	}
+}
 
 int main() {
     int n = 4; // Define the number of integers to sort
@@ -249,27 +296,19 @@ int main() {
     int* sorted = calloc(n, sizeof(int));  // Keep track of sorted integers
     int* result = malloc(n * sizeof(int)); // Store the current result
 
-	//int* reservationRules = malloc((n - 1) * sizeof(int));
-    //ReservationList* reservationLists = malloc((n - 1) * sizeof(ReservationList));
-    //ReservationGroup* reservationGroupRules = malloc((n - 1) * sizeof(ReservationList));
-
+    ReservationRule* reservationRules = malloc((n - 1) * sizeof(ReservationRule));
+    ReservationList* reservationLists = malloc((n - 1) * sizeof(ReservationList));
 	for (int i = 0; i < n - 1; i++) {
-		reservationRules[i] = -1;
+		reservationRules[i].resList = -1;
 		initList(&(reservationLists[i].data), sizeof(int), 1);
         reservationLists[i].nextListInd = -1;
-        update();
+        reservationLists[i].out = 0;
+        notChosenAnymore(nodes, n, i, reservationRules, reservationLists);
 	}
-
-
-
-    // Populate the highests array based on the `highest` attribute of each node
-    for (int i = 0; i < n; i++) {
-        update
-    }
 
     // Try all possible ways to sort the integers
     printf("All possible valid orderings:\n");
-    try_sort(nodes, n, sorted, 0, result, rules, ruleSizes, ruleCapacities, reservations, reservationSize, reservationsCapacity, reservationSizes, reservationsCapacities);
+    try_sort(nodes, n, sorted, 0, result, );
 
     // Free allocated memory
     for (int i = 0; i < n; i++) {
