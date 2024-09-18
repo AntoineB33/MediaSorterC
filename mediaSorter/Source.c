@@ -6,11 +6,9 @@
 
 // Define a structure to represent the graph node
 typedef struct {
-    int* ulteriors;     // List of integers that must come after
-    int ulteriors_size; // Size of the 'ulteriors' list
+	GenericList ulteriors;	 // List of integers that must come after
     int nbPost;         // Count of integers that must be placed before this
     int highest;        // Highest placement allowed for this integer
-    int lowest;		 // Lowest placement allowed for this integer
 } Node;
 
 typedef struct {
@@ -20,7 +18,6 @@ typedef struct {
 
 typedef struct {
     GenericList data;
-    int all;
     int out;
     int prevListInd;
     int nextListInd;
@@ -101,8 +98,8 @@ int all_sorted(int* sorted, int n) {
     return 1;
 }
 
-// Recursive function to try all possible ways to sort the integers
-void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, int* reservationRules, ReservationList* reservationLists) {
+// Recursive function to try all possible ways to sort the integer
+void try_sort(Node* nodes, int n, int depth, int* result, GenericList* lowests, ReservationRule* reservationRules, ReservationList* reservationLists) {
     // If all integers are sorted, print the current result
     if (depth == n) {
         for (int i = 0; i < n; i++) {
@@ -112,41 +109,39 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, int* rese
         return;
     }
 
-    if (reservationRules[depth] != -1) {
-		int pt = rules[depth][j].pt;
-        for (int m = 0; m < reservationSizes[pt]; m++) {
-			if (!reservations[pt][m].placed) {
-				int i = reservations[pt][m].integer;
-				if (!sorted[i]) {
-					// Place this integer
-					sorted[i] = 1;
-					result[depth] = i;
-					reservations[pt][m].placed = 1;
-
-					// Update the nbPost of all integers that come after the current one
-					for (int k = 0; k < nodes[i].ulteriors_size; k++) {
-						nodes[nodes[i].ulteriors[k]].nbPost--;
+    int placeInd;
+	if (reservationRules[depth].resList != -1) {
+        if (reservationRules[depth].all == 0) {
+            do {
+				for (int i = 0; i < reservationLists[placeInd].data.size; i++) {
+					int* currentElement = reservationLists[placeInd].data.data + i * reservationLists[placeInd].data.elemSize;
+					if (nodes[*currentElement].nbPost == 0) {
+						// Place this integer
+						result[depth] = *currentElement;
+						chosen(nodes, n, *currentElement, reservationRules, reservationLists);
+						// Recur to place the next integer
+						try_sort(nodes, n, depth + 1, result, lowests, reservationRules, reservationLists);
+						// Backtrack: unplace this integer
+						notChosenAnymore(nodes, n, *currentElement, reservationRules, reservationLists);
 					}
-
-					// Recur to place the next integer
-					try_sort(nodes, n, sorted, depth + 1, result, rules, ruleSizes, ruleCapacities, reservations, reservationSize, reservationsCapacity, reservationSizes, reservationsCapacities);
-
-					// Backtrack: unplace this integer
-					for (int k = 0; k < nodes[i].ulteriors_size; k++) {
-						nodes[nodes[i].ulteriors[k]].nbPost++;
-					}
-					sorted[i] = 0;
-					reservations[pt][m].placed = 0;
 				}
-			}
+				placeInd = reservationLists[placeInd].nextListInd;
+			} while (1);
         }
     }
-    if (!highests[depth].placed) {
-        int i = highests[depth].integer;
+
+
+
+    // List the integers that can be placed (those with nbPost == 0)
+    for (int i = 0; i < n; i++) {
         if (!sorted[i] && nodes[i].nbPost == 0) {
             // Place this integer
             sorted[i] = 1;
             result[depth] = i;
+
+            if (nodes[i].highest < n - 1) {
+                highests[nodes[i].highest].placed = 1;
+            }
 
             // Update the nbPost of all integers that come after the current one
             for (int j = 0; j < nodes[i].ulteriors_size; j++) {
@@ -156,43 +151,15 @@ void try_sort(Node* nodes, int n, int* sorted, int depth, int* result, int* rese
             // Recur to place the next integer
             try_sort(nodes, n, sorted, depth + 1, result, highests);
 
+            if (nodes[i].highest < n - 1) {
+                highests[nodes[i].highest].placed = 0;
+            }
+
             // Backtrack: unplace this integer
             for (int j = 0; j < nodes[i].ulteriors_size; j++) {
                 nodes[nodes[i].ulteriors[j]].nbPost++;
             }
             sorted[i] = 0;
-        }
-    }
-    else {
-        // List the integers that can be placed (those with nbPost == 0)
-        for (int i = 0; i < n; i++) {
-            if (!sorted[i] && nodes[i].nbPost == 0) {
-                // Place this integer
-                sorted[i] = 1;
-                result[depth] = i;
-
-                if (nodes[i].highest < n - 1) {
-                    highests[nodes[i].highest].placed = 1;
-                }
-
-                // Update the nbPost of all integers that come after the current one
-                for (int j = 0; j < nodes[i].ulteriors_size; j++) {
-                    nodes[nodes[i].ulteriors[j]].nbPost--;
-                }
-
-                // Recur to place the next integer
-                try_sort(nodes, n, sorted, depth + 1, result, highests);
-
-                if (nodes[i].highest < n - 1) {
-                    highests[nodes[i].highest].placed = 0;
-                }
-
-                // Backtrack: unplace this integer
-                for (int j = 0; j < nodes[i].ulteriors_size; j++) {
-                    nodes[nodes[i].ulteriors[j]].nbPost++;
-                }
-                sorted[i] = 0;
-            }
         }
     }
 }
@@ -234,6 +201,10 @@ void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRul
             reservationRules[placeInd].all = (placeIndPrev != highest);
         }
     }
+	for (int j = 0; j < nodes[i].ulteriors.size; j++) {
+		int ulterior = nodes[i].ulteriors[j];
+		nodes[ulterior].nbPost--;
+	}
 }
 
 void chosen(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
@@ -241,21 +212,26 @@ void chosen(Node* nodes, int n, int i, ReservationRule* reservationRules, Reserv
 		int highest = nodes[i].highest;
         int placeInd = highest;
         int placeIndPrev;
-        if (reservationLists[highest].data.size > highest - reservationLists[highest].prevListInd) {
+        do {
+            placeIndPrev = placeInd;
+            placeInd = reservationLists[placeIndPrev].prevListInd;
+        } while (reservationLists[placeIndPrev].out == 0);
+        placeInd++;
+        reservationRules[placeInd].resList = -1;
+		reservationLists[placeIndPrev].prevListInd++;
+		if (reservationRules[placeInd].all == 0) {
             do {
                 placeIndPrev = placeInd;
-                placeInd = reservationLists[placeIndPrev].prevListInd;
-            } while (reservationLists[placeIndPrev].out == 0);
-            reservationRules[placeInd].resList = -1;
-			reservationLists[placeIndPrev].prevListInd++;
-			removeElement(&(reservationLists[highest].data), i);
-			if (reservationRules[placeInd - 1].all == 0) {
-
-			}
+                placeInd = reservationLists[placeInd].nextListInd;
+            } while (placeInd != highest && reservationLists[placeInd].data.size >= placeInd - reservationLists[placeInd].prevListInd);
+            reservationLists[placeIndPrev].nextListInd = -1;
+            reservationLists[placeInd].out = 1;
 		}
-		else {
-
-		}
+        removeElement(&(reservationLists[highest].data), i);
+	}
+	for (int j = 0; j < nodes[i].ulteriors.size; j++) {
+		int ulterior = nodes[i].ulteriors[j];
+		nodes[ulterior].nbPost++;
 	}
 }
 
@@ -264,36 +240,8 @@ int main() {
 
     // Dynamically allocate memory for the array of nodes
     Node* nodes = (Node*)malloc(n * sizeof(Node));
+	GenericList* lowests = malloc((n - 1) * sizeof(GenericList));
 
-    // Setup the constraints for each integer
-    // Integer 0
-    nodes[0].ulteriors_size = 2;
-    nodes[0].ulteriors = (int*)malloc(nodes[0].ulteriors_size * sizeof(int));
-    nodes[0].ulteriors[0] = 1;  // 0 must come before 1
-    nodes[0].ulteriors[1] = 2;  // 0 must come before 2
-    nodes[0].nbPost = 0;
-    nodes[0].highest = 1; // 0 must be placed at index 1 or earlier
-
-    // Integer 1
-    nodes[1].ulteriors_size = 1;
-    nodes[1].ulteriors = (int*)malloc(nodes[1].ulteriors_size * sizeof(int));
-    nodes[1].ulteriors[0] = 3;  // 1 must come before 3
-    nodes[1].nbPost = 1; // 1 must come after 0
-    nodes[1].highest = 3; // 1 must be placed at index 2 or earlier
-
-    // Integer 2
-    nodes[2].ulteriors_size = 0;
-    nodes[2].ulteriors = NULL; // 2 has no restrictions
-    nodes[2].nbPost = 1; // 2 must come after 0
-    nodes[2].highest = 3; // 2 must be placed at index 3 or earlier
-
-    // Integer 3
-    nodes[3].ulteriors_size = 0;
-    nodes[3].ulteriors = NULL; // 3 has no restrictions
-    nodes[3].nbPost = 1; // 3 must come after 1
-    nodes[3].highest = 2; // 3 must be placed at index 3 or earlier
-
-    int* sorted = calloc(n, sizeof(int));  // Keep track of sorted integers
     int* result = malloc(n * sizeof(int)); // Store the current result
 
     ReservationRule* reservationRules = malloc((n - 1) * sizeof(ReservationRule));
@@ -308,14 +256,13 @@ int main() {
 
     // Try all possible ways to sort the integers
     printf("All possible valid orderings:\n");
-    try_sort(nodes, n, sorted, 0, result, );
+    try_sort(nodes, n, 0, result, lowests, reservationRules, reservationLists);
 
     // Free allocated memory
     for (int i = 0; i < n; i++) {
-        free(nodes[i].ulteriors);
+		freeList(&(nodes[i].ulteriors));
     }
     free(nodes);
-    free(sorted);
     free(result);
 
     return 0;
