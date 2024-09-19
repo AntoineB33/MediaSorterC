@@ -7,6 +7,8 @@
 // Define a structure to represent the graph node
 typedef struct {
 	GenericList ulteriors;	 // List of integers that must come after
+	char** conditions;	   // List of conditions that must be satisfied
+	int conditions_size;   // Number of conditions
     int nbPost;         // Count of integers that must be placed before this
     int highest;        // Highest placement allowed for this integer
 } Node;
@@ -99,73 +101,87 @@ int all_sorted(int* sorted, int n) {
 }
 
 // Recursive function to try all possible ways to sort the integer
-void try_sort(Node* nodes, int n, int depth, int* result, GenericList* lowests, ReservationRule* reservationRules, ReservationList* reservationLists) {
-    // If all integers are sorted, print the current result
-    if (depth == n) {
-        for (int i = 0; i < n; i++) {
-            printf("%d ", result[i]);
-        }
-        printf("\n");
-        return;
-    }
-
-    int placeInd;
-	if (reservationRules[depth].resList != -1) {
-        if (reservationRules[depth].all == 0) {
-            do {
-				for (int i = 0; i < reservationLists[placeInd].data.size; i++) {
-					int* currentElement = reservationLists[placeInd].data.data + i * reservationLists[placeInd].data.elemSize;
-					if (nodes[*currentElement].nbPost == 0) {
-						// Place this integer
-						result[depth] = *currentElement;
-						chosen(nodes, n, *currentElement, reservationRules, reservationLists);
-						// Recur to place the next integer
-						try_sort(nodes, n, depth + 1, result, lowests, reservationRules, reservationLists);
-						// Backtrack: unplace this integer
-						notChosenAnymore(nodes, n, *currentElement, reservationRules, reservationLists);
-					}
-				}
-				placeInd = reservationLists[placeInd].nextListInd;
-			} while (1);
+void try_sort(Node* nodes, GenericList* lowests, unsigned short int n, unsigned char rank) {
+    ReservationRule** reservationRules = malloc((n - 1) * sizeof(ReservationRule));
+    ReservationList** reservationLists = malloc((n - 1) * sizeof(ReservationList));
+	unsigned short int* result = malloc(n * sizeof(unsigned short int)); // Store the current result
+    unsigned short int** rests = malloc(n * sizeof(unsigned short int*));
+    for (unsigned short int d = 0; d < n - 1; d++) {
+        for (int i = 0; i < n - 1; i++) {
+            reservationRules[d][i].resList = -1;
+            initList(&(reservationLists[d][i].data), sizeof(unsigned short int), 1);
+            reservationLists[d][i].nextListInd = -1;
+            reservationLists[d][i].out = 0;
+            notChosenAnymore(nodes, n, i, reservationRules[d], reservationLists[d]);
+            rests[i] = malloc((n - i) * sizeof(unsigned short int));
+            rests[0][i] = i;
         }
     }
+	unsigned short int depth = 0;
+    unsigned short int placeInd;
+    while (1) {
+        if (reservationRules[depth].resList != -1) {
+            if (reservationRules[depth].all == 0) {
+				placeInd = reservationRules[depth].resList;
+                do {
+                    for (unsigned short int i = 0; i < reservationLists[placeInd].data.size; i++) {
+                        unsigned short int currentElement = reservationLists[placeInd].data.data[i];
+                        if (nodes[currentElement].nbPost == 0) {
+                            /*for (int condInd = 0; condInd < nodes[currentElement].conditions_size; condInd++) {
 
+                            }*/
+                            // Place this integer
+                            result[depth] = currentElement;
+                            chosen(nodes, n, currentElement, reservationRules, reservationLists);
 
-
-    // List the integers that can be placed (those with nbPost == 0)
-    for (int i = 0; i < n; i++) {
-        if (!sorted[i] && nodes[i].nbPost == 0) {
-            // Place this integer
-            sorted[i] = 1;
-            result[depth] = i;
-
-            if (nodes[i].highest < n - 1) {
-                highests[nodes[i].highest].placed = 1;
+                            // Recur to place the next integer
+                            depth++;
+                            // Backtrack: unplace this integer
+                            notChosenAnymore(nodes, n, currentElement, reservationRules, reservationLists);
+                        }
+                    }
+                    placeInd = reservationLists[placeInd].nextListInd;
+                } while (placeInd != -1);
             }
+        }
 
-            // Update the nbPost of all integers that come after the current one
-            for (int j = 0; j < nodes[i].ulteriors_size; j++) {
-                nodes[nodes[i].ulteriors[j]].nbPost--;
+
+
+        // List the integers that can be placed (those with nbPost == 0)
+        for (unsigned short int i = 0; i < n; i++) {
+            if (!sorted[i] && nodes[i].nbPost == 0) {
+                // Place this integer
+                sorted[i] = 1;
+                result[depth] = i;
+
+                if (nodes[i].highest < n - 1) {
+                    highests[nodes[i].highest].placed = 1;
+                }
+
+                // Update the nbPost of all integers that come after the current one
+                for (int j = 0; j < nodes[i].ulteriors_size; j++) {
+                    nodes[nodes[i].ulteriors[j]].nbPost--;
+                }
+
+                // Recur to place the next integer
+                try_sort(nodes, n, sorted, depth + 1, result, highests);
+
+                if (nodes[i].highest < n - 1) {
+                    highests[nodes[i].highest].placed = 0;
+                }
+
+                // Backtrack: unplace this integer
+                for (int j = 0; j < nodes[i].ulteriors_size; j++) {
+                    nodes[nodes[i].ulteriors[j]].nbPost++;
+                }
+                sorted[i] = 0;
             }
-
-            // Recur to place the next integer
-            try_sort(nodes, n, sorted, depth + 1, result, highests);
-
-            if (nodes[i].highest < n - 1) {
-                highests[nodes[i].highest].placed = 0;
-            }
-
-            // Backtrack: unplace this integer
-            for (int j = 0; j < nodes[i].ulteriors_size; j++) {
-                nodes[nodes[i].ulteriors[j]].nbPost++;
-            }
-            sorted[i] = 0;
         }
     }
 }
 
 void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
-    if (nodes[i].highest < n - 1) {
+    /*if (nodes[i].highest < n - 1) {
         int highest = nodes[i].highest;
         int resListInd = reservationRules[highest].resList;
         if (resListInd == -1) {
@@ -200,7 +216,7 @@ void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRul
 			reservationRules[placeInd].resList = placeIndPrev;
             reservationRules[placeInd].all = (placeIndPrev != highest);
         }
-    }
+    }*/
 	for (int j = 0; j < nodes[i].ulteriors.size; j++) {
 		int ulterior = nodes[i].ulteriors[j];
 		nodes[ulterior].nbPost--;
@@ -236,27 +252,20 @@ void chosen(Node* nodes, int n, int i, ReservationRule* reservationRules, Reserv
 }
 
 int main() {
-    int n = 4; // Define the number of integers to sort
+    long long int n = 4; // Define the number of integers to sort
+    if (n > 1000) {
+		printf("The number of integers must be less than 1000\n");
+		return 1;
+    }
 
     // Dynamically allocate memory for the array of nodes
-    Node* nodes = (Node*)malloc(n * sizeof(Node));
+    Node* nodes = malloc(n * sizeof(Node));
 	GenericList* lowests = malloc((n - 1) * sizeof(GenericList));
 
-    int* result = malloc(n * sizeof(int)); // Store the current result
-
-    ReservationRule* reservationRules = malloc((n - 1) * sizeof(ReservationRule));
-    ReservationList* reservationLists = malloc((n - 1) * sizeof(ReservationList));
-	for (int i = 0; i < n - 1; i++) {
-		reservationRules[i].resList = -1;
-		initList(&(reservationLists[i].data), sizeof(int), 1);
-        reservationLists[i].nextListInd = -1;
-        reservationLists[i].out = 0;
-        notChosenAnymore(nodes, n, i, reservationRules, reservationLists);
-	}
 
     // Try all possible ways to sort the integers
     printf("All possible valid orderings:\n");
-    try_sort(nodes, n, 0, result, lowests, reservationRules, reservationLists);
+    try_sort(nodes, n, lowests);
 
     // Free allocated memory
     for (int i = 0; i < n; i++) {
