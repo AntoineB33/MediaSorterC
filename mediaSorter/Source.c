@@ -302,24 +302,50 @@ void chosen(Node* nodes, int n, int i, ReservationRule* reservationRules, Reserv
 }
 
 int main() {
-    int n = 4; // Define the number of integers to sort
-	int nb_att = 0; // Define the number of attributes
+
+	// Define the parameters
 	int nbItBefUpdErr = 3; // Define the number of iterations before updating the error
 	int nbLeavesMax = 1000; // Define the maximum time to sort
 	float repartTol = 0.1; // Define the repartition tolerance
 
-    if (n > 65535) {
-		printf("The number of integers must be less than 65 535\n");
-		return 1;
-    }
+
+    // example of nodes, lowests and attributeMngs
+
+    int n = 4; // Define the number of integers to sort
+    int nb_att = 0; // Define the number of attributes
 
     // Dynamically allocate memory for the array of nodes
     Node* nodes = malloc(n * sizeof(Node));
 	GenericList* lowests = malloc((n - 1) * sizeof(GenericList));
 	AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
 
-	// example of nodes, lowests and attributeMngs
+	/*nodes[0].nbPost = 0;
+	nodes[0].highest = 0;
+	initList(&(nodes[0].ulteriors), sizeof(int), 0);
+	nodes[0].conditions_size = 0;
+	nodes[0].conditions = malloc(0 * sizeof(char*));
 
+	nodes[1].nbPost = 1;
+	nodes[1].highest = 1;
+	initList(&(nodes[1].ulteriors), sizeof(int), 0);
+	addElement(&(nodes[1].ulteriors), &(int) { 0 });
+	nodes[1].conditions_size = 0;
+	nodes[1].conditions = malloc(0 * sizeof(char*));
+
+	nodes[2].nbPost = 1;
+	nodes[2].highest = 2;
+	initList(&(nodes[2].ulteriors), sizeof(int), 0);
+	addElement(&(nodes[2].ulteriors), &(int) { 0 });
+	nodes[2].conditions_size = 0;
+	nodes[2].conditions = malloc(0 * sizeof(char*));
+
+	nodes[3].nbPost = 2;
+	nodes[3].highest = 3;
+	initList(&(nodes[3].ulteriors), sizeof(int), 0);
+	addElement(&(nodes[3].ulteriors), &(int) { 1 });
+	addElement(&(nodes[3].ulteriors), &(int) { 2 });
+	nodes[3].conditions_size = 0;
+	nodes[3].conditions = malloc(0 * sizeof(char*));*/
 
 
     int nb_process = 10;
