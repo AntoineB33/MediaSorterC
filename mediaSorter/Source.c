@@ -4,6 +4,13 @@
 #include "cJSON.h"  // Include the cJSON header
 
 
+typedef struct {
+    void* data;       // Pointer to the array (generic list)
+    size_t size;      // Number of elements in the list
+    size_t capacity;  // Capacity of the list
+    size_t elemSize;  // Size of each element
+} GenericList;
+
 // Define a structure to represent the graph node
 typedef struct {
 	GenericList ulteriors;	 // List of integers that must come after
@@ -28,13 +35,6 @@ typedef struct {
 typedef struct {
     int lastOcc;
 } AttributeMng;
-
-typedef struct {
-    void* data;       // Pointer to the array (generic list)
-    size_t size;      // Number of elements in the list
-    size_t capacity;  // Capacity of the list
-    size_t elemSize;  // Size of each element
-} GenericList;
 
 
 // Function to initialize the list
@@ -94,6 +94,87 @@ void freeList(GenericList* list) {
     list->capacity = 0;
 }
 
+void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
+    if (nodes[i].highest < n - 1) {
+        int highest = nodes[i].highest;
+        int resListInd = reservationRules[highest].resList;
+        if (resListInd == -1) {
+            reservationRules[highest].all = 0;
+            reservationLists[highest].out = 1;
+            reservationLists[highest].prevListInd = highest - 1;
+            reservationLists[highest].nextListInd = -1;
+            addElement(&(reservationLists[highest].data), &i);
+        }
+        else {
+            int resThatWasThere = reservationRules[highest].resList;
+            if (resThatWasThere != highest) {
+                reservationLists[highest].prevListInd = reservationLists[resThatWasThere].prevListInd;
+                reservationLists[resThatWasThere].prevListInd = highest;
+                reservationLists[highest].nextListInd = resThatWasThere;
+            }
+            addElement(&(reservationLists[highest].data), &i);
+            int placeInd = highest;
+            int placeIndPrev;
+            do {
+                do {
+                    placeIndPrev = placeInd;
+                    placeInd = reservationLists[placeIndPrev].prevListInd;
+                } while (reservationLists[placeIndPrev].out == 0);
+                if (reservationRules[placeInd].resList == -1) {
+                    break;
+                }
+                reservationLists[placeIndPrev].prevListInd = placeInd;
+                reservationLists[placeIndPrev].out = 0;
+                reservationLists[placeInd].nextListInd = placeIndPrev;
+            } while (1);
+            reservationRules[placeInd].resList = placeIndPrev;
+            reservationRules[placeInd].all = (placeIndPrev != highest);
+        }
+    }
+    for (int j = 0; j < nodes[i].ulteriors.size; j++) {
+        int ulterior = ((int*)nodes[i].ulteriors.data)[j];
+        nodes[ulterior].nbPost--;
+    }
+}
+
+void chosenUlt(Node* nodes, int rank, int depth, int*** rests, int** restsSizes, int i) {
+    for (int j = 0; j < nodes[i].ulteriors.size; j++) {
+        int ulterior = ((int*)nodes[i].ulteriors.data)[j];
+        nodes[ulterior].nbPost++;
+        if (nodes[ulterior].nbPost == 0) {
+            rests[rank][depth][restsSizes[rank][depth]] = i;
+            restsSizes[rank][depth]++;
+        }
+    }
+}
+
+void chosen(Node* nodes, int n, int rank, int depth, int** result, int*** rests, int** restsSizes, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
+	if (nodes[i].highest < n - 1) {
+        int highest = nodes[i].highest;
+        int placeInd = highest;
+        int placeIndPrev;
+        do {
+            placeIndPrev = placeInd;
+            placeInd = reservationLists[placeIndPrev].prevListInd;
+        } while (reservationLists[placeIndPrev].out == 0);
+        placeInd++;
+        reservationRules[placeInd].resList = -1;
+        reservationLists[placeIndPrev].prevListInd++;
+        if (reservationRules[placeInd].all == 0) {
+            do {
+                placeIndPrev = placeInd;
+                placeInd = reservationLists[placeInd].nextListInd;
+            } while (placeInd != highest && reservationLists[placeInd].data.size >= placeInd - reservationLists[placeInd].prevListInd);
+            reservationLists[placeIndPrev].nextListInd = -1;
+            reservationLists[placeInd].out = 1;
+        }
+        removeElement(&(reservationLists[highest].data), i);
+    }
+    for (int j = 0; j < nodes[i].ulteriors.size; j++) {
+		chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)nodes[i].ulteriors.data)[j]);
+    }
+}
+
 // Utility function to check if all integers have been sorted
 int all_sorted(int* sorted, int n) {
     for (int i = 0; i < n; i++) {
@@ -105,9 +186,6 @@ int all_sorted(int* sorted, int n) {
 }
 
 int check_conditions(Node* nodes, int* result, int n, int i) {
-	if (nodes[i].nbPost == 0) {
-		return 0;
-	}
 	//for (int condInd = 0; condInd < nodes[i].conditions_size; condInd++) {
 	//	// Check if the condition is satisfied
 	//}
@@ -115,8 +193,7 @@ int check_conditions(Node* nodes, int* result, int n, int i) {
 }
 
 // Recursive function to try all possible ways to sort the integer
-int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMax, float repartTol, Node* nodes, GenericList* lowests, int** result, int** reservationListsResult, int*** rests, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
-	int depth = 0;
+int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* lowests, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
     int placeInd;
     int choiceInd;
 	int ascending = 1;
@@ -125,13 +202,48 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMax, float repartTol
 	int befUpdErr = nbItBefUpdErr;
 	int errorCopy = *error;
     int nbLeaves = 0;
-	int reste = *startsSize % nb_process;
 	int startStarts = *startsSize * rank / nb_process + min(reste, rank);
     int endStarts = *startsSize * (rank + 1) / nb_process + min(reste, rank + 1);
     int startInd = 0;
-    int depth = 0;
+    int depth = -1;
     int endI = *end;
     while (1) {
+        if (ascending == 1) {
+            depth++;
+            if (depth == endI) {
+                if (mpiManagement == 0) {
+                    errorCopy = min(*error, errorCopy);
+                    befUpdErr = nbItBefUpdErr;
+                    // Print the sorted integers
+                    for (int i = 0; i < n; i++) {
+                        printf("%d ", rests[rank][i][result[rank][i]]);
+                    }
+                    printf("\n");
+                    startInd++;
+                    if (startInd == endStarts) {
+                        return 0;
+                    }
+                    if (startInd == startStarts) {
+                        endI = n;
+                    }
+                }
+                else {
+                    if (nbLeaves == nbLeavesMax) {
+                        return 0;
+                    }
+                    nbLeaves++;
+                }
+                ascending = 0;
+			}
+			else if(depth != 0) {
+                for (int i = 0; i < result[rank][depth - 1]; i++) {
+                    rests[rank][depth][i] = rests[rank][depth - 1][i];
+                }
+                for (int i = result[rank][depth - 1] + 1; i < restsSizes[rank][depth - 1]; i++) {
+                    rests[rank][depth][i - 1] = rests[rank][depth - 1][i];
+                }
+			}
+        }
         if (ascending == 0) {
 			befUpdErr--;
 			if (befUpdErr == 0) {
@@ -143,7 +255,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMax, float repartTol
 					if (nbLeaves % nb_process >= *startsSize % nb_process) {
 						*startsSize = nbLeaves;
                         *end = endI;
-                        if ((nbLeaves % nb_process) / nb_process <= repartTol) {
+                        if (nbLeaves % nb_process == 0 || (nbLeaves % nb_process) / nb_process <= repartTol && nbLeaves > nbLeavesMin) {
                             return 0;
                         }
 					}
@@ -154,20 +266,44 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMax, float repartTol
                     break;
                 }
             }
+            ascending = 1;
             depth--;
             notChosenAnymore(nodes, n, rests[rank][depth][result[rank][depth]], reservationRules[rank], reservationLists[rank]);
         }
-        if (reservationRules[rank][depth].resList != -1) {
+        for (int i = 0; i < lowests[depth].size; i++) {
+			chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)lowests[depth].data)[i]);
+        }
+        if (reservationRules[rank][depth].resList == -1) {
+            do {
+                if (result[rank][depth] == 0) {
+                    ascending = 0;
+                    break;
+                }
+                result[rank][depth]--;
+                currentElement = rests[rank][depth][result[rank][depth]];
+                if (check_conditions(nodes, result[rank], n, currentElement) == 0) {
+                    chosen(nodes, n, rank, depth, result, rests, restsSizes, currentElement, reservationRules[rank], reservationLists[rank]);
+                    break;
+                }
+            } while (1);
+        }
+        else {
             found = 0;
             choiceInd = 0;
             placeInd = reservationRules[rank][depth].resList;
             do {
                 for (int i = 0; i < reservationLists[rank][placeInd].data.size; i++) {
-                    currentElement = reservationLists[rank][placeInd].data.data[i];
-                    if (check_conditions(nodes, result[rank], n, currentElement) == 1) {
-                        reservationListsResult[rank][depth] = i;
-                        result[rank][depth] = i;
-                        chosen(nodes, n, currentElement, reservationRules[rank], reservationLists[rank]);
+                    currentElement = ((int*)reservationLists[rank][placeInd].data.data)[i];
+                    if (nodes[currentElement].nbPost == 0 && check_conditions(nodes, result[rank], n, currentElement) == 1) {
+                        reservationListsResult[rank][depth] = placeInd;
+                        reservationListsElemResult[rank][depth] = i;
+                        for (int j = 0; j < restsSizes[rank][depth]; j++) {
+                            if (rests[rank][depth][j] == currentElement) {
+                                result[rank][depth] = j;
+                                break;
+                            }
+                        }
+                        chosen(nodes, n, rank, depth, result, rests, restsSizes, currentElement, reservationRules[rank], reservationLists[rank]);
                         found = 1;
                         break;
                     }
@@ -184,127 +320,14 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMax, float repartTol
                 ascending = 0;
             }
         }
-        else {
-            do {
-                if (result[rank][depth] == 0) {
-                    break;
-                }
-                result[rank][depth]--;
-                currentElement = rests[rank][depth][result[rank][depth]];
-                if (check_conditions(nodes, result[rank], n, currentElement) == 0) {
-                    chosen(nodes, n, currentElement, reservationRules[rank], reservationLists[rank]);
-                    ascending = 0;
-                    break;
-                }
-            } while (1);
-        }
-        if (ascending == 1) {
-            depth++;
-            if (depth == endI) {
-                if(mpiManagement == 0) {
-                    errorCopy = min(*error, errorCopy);
-                    befUpdErr = nbItBefUpdErr;
-					// Print the sorted integers
-					for (int i = 0; i < n; i++) {
-						printf("%d ", rests[rank][i][result[rank][i]]);
-					}
-					printf("\n");
-                    startInd++;
-                    if (startInd == endStarts) {
-                        return 0;
-                    }
-                    if (startInd == startStarts) {
-                        endI = n;
-                    }
-				}
-                else {
-                    if (nbLeaves == nbLeavesMax) {
-                        return 0;
-                    }
-					nbLeaves++;
-                }
-                ascending = 0;
-                break;
-            }
-        }
     }
-}
-
-void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
-    if (nodes[i].highest < n - 1) {
-        int highest = nodes[i].highest;
-        int resListInd = reservationRules[highest].resList;
-        if (resListInd == -1) {
-            reservationRules[highest].all = 0;
-            reservationLists[highest].out = 1;
-            reservationLists[highest].prevListInd = highest - 1;
-			reservationLists[highest].nextListInd = -1;
-            addElement(&(reservationLists[highest].data), &i);
-        }
-        else {
-            int resThatWasThere = reservationRules[highest].resList;
-            if (resThatWasThere != highest) {
-                reservationLists[highest].prevListInd = reservationLists[resThatWasThere].prevListInd;
-                reservationLists[resThatWasThere].prevListInd = highest;
-                reservationLists[highest].nextListInd = resThatWasThere;
-			}
-            addElement(&(reservationLists[highest].data), &i);
-            int placeInd = highest;
-            int placeIndPrev;
-            do{
-                do{
-					placeIndPrev = placeInd;
-                    placeInd = reservationLists[placeIndPrev].prevListInd;
-                } while (reservationLists[placeIndPrev].out == 0);
-				if (reservationRules[placeInd].resList == -1) {
-					break;
-				}
-				reservationLists[placeIndPrev].prevListInd = placeInd;
-                reservationLists[placeIndPrev].out = 0;
-                reservationLists[placeInd].nextListInd = placeIndPrev;
-            } while (1);
-			reservationRules[placeInd].resList = placeIndPrev;
-            reservationRules[placeInd].all = (placeIndPrev != highest);
-        }
-    }
-	for (int j = 0; j < nodes[i].ulteriors.size; j++) {
-		int ulterior = nodes[i].ulteriors[j];
-		nodes[ulterior].nbPost--;
-	}
-}
-
-void chosen(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
-	if (nodes[i].highest < n - 1) {
-		int highest = nodes[i].highest;
-        int placeInd = highest;
-        int placeIndPrev;
-        do {
-            placeIndPrev = placeInd;
-            placeInd = reservationLists[placeIndPrev].prevListInd;
-        } while (reservationLists[placeIndPrev].out == 0);
-        placeInd++;
-        reservationRules[placeInd].resList = -1;
-		reservationLists[placeIndPrev].prevListInd++;
-		if (reservationRules[placeInd].all == 0) {
-            do {
-                placeIndPrev = placeInd;
-                placeInd = reservationLists[placeInd].nextListInd;
-            } while (placeInd != highest && reservationLists[placeInd].data.size >= placeInd - reservationLists[placeInd].prevListInd);
-            reservationLists[placeIndPrev].nextListInd = -1;
-            reservationLists[placeInd].out = 1;
-		}
-        removeElement(&(reservationLists[highest].data), i);
-	}
-	for (int j = 0; j < nodes[i].ulteriors.size; j++) {
-		int ulterior = nodes[i].ulteriors[j];
-		nodes[ulterior].nbPost++;
-	}
 }
 
 int main() {
 
 	// Define the parameters
 	int nbItBefUpdErr = 3; // Define the number of iterations before updating the error
+	int nbLeavesMin = 100; // Define the minimum time to sort
 	int nbLeavesMax = 1000; // Define the maximum time to sort
 	float repartTol = 0.1; // Define the repartition tolerance
 
@@ -319,33 +342,43 @@ int main() {
 	GenericList* lowests = malloc((n - 1) * sizeof(GenericList));
 	AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
 
-	/*nodes[0].nbPost = 0;
-	nodes[0].highest = 0;
-	initList(&(nodes[0].ulteriors), sizeof(int), 0);
-	nodes[0].conditions_size = 0;
-	nodes[0].conditions = malloc(0 * sizeof(char*));
+    nodes[0].nbPost = 0;
+    nodes[0].highest = 0;
+    initList(&(nodes[0].ulteriors), sizeof(int), 1);
+    nodes[0].conditions_size = 0;
+    nodes[0].conditions = malloc(0 * sizeof(char*));
 
-	nodes[1].nbPost = 1;
-	nodes[1].highest = 1;
-	initList(&(nodes[1].ulteriors), sizeof(int), 0);
-	addElement(&(nodes[1].ulteriors), &(int) { 0 });
-	nodes[1].conditions_size = 0;
-	nodes[1].conditions = malloc(0 * sizeof(char*));
+    nodes[1].nbPost = 1;
+    nodes[1].highest = 1;
+    initList(&(nodes[1].ulteriors), sizeof(int), 1);
+    int value = 0;
+	addElement(&(nodes[1].ulteriors), &value);
+    nodes[1].conditions_size = 0;
+    nodes[1].conditions = malloc(0 * sizeof(char*));
 
-	nodes[2].nbPost = 1;
-	nodes[2].highest = 2;
-	initList(&(nodes[2].ulteriors), sizeof(int), 0);
-	addElement(&(nodes[2].ulteriors), &(int) { 0 });
-	nodes[2].conditions_size = 0;
-	nodes[2].conditions = malloc(0 * sizeof(char*));
+    nodes[2].nbPost = 1;
+    nodes[2].highest = 2;
+    initList(&(nodes[2].ulteriors), sizeof(int), 1);
+    value = 0;
+    addElement(&(nodes[1].ulteriors), &value);
+    nodes[2].conditions_size = 0;
+    nodes[2].conditions = malloc(0 * sizeof(char*));
 
-	nodes[3].nbPost = 2;
-	nodes[3].highest = 3;
-	initList(&(nodes[3].ulteriors), sizeof(int), 0);
-	addElement(&(nodes[3].ulteriors), &(int) { 1 });
-	addElement(&(nodes[3].ulteriors), &(int) { 2 });
-	nodes[3].conditions_size = 0;
-	nodes[3].conditions = malloc(0 * sizeof(char*));*/
+    nodes[3].nbPost = 2;
+    nodes[3].highest = 3;
+    initList(&(nodes[3].ulteriors), sizeof(int), 1);
+	value = 1;
+	addElement(&(nodes[3].ulteriors), &value);
+	value = 2;
+	addElement(&(nodes[3].ulteriors), &value);
+    nodes[3].conditions_size = 0;
+    nodes[3].conditions = malloc(0 * sizeof(char*));
+
+    for (int i = 0; i < n; i++) {
+		initList(&(lowests[i]), sizeof(int), 1);
+    }
+
+
 
 
     int nb_process = 10;
@@ -354,23 +387,30 @@ int main() {
 		return 1;
 	}
     int** result = malloc(nb_process * sizeof(int*)); // Store the current result
-    int** reservationListsResult = malloc(nb_process * sizeof(int*));
-    int*** rests = malloc(nb_process * sizeof(int*));
+    int*** rests = malloc(nb_process * sizeof(int**));
+	int** restsSizes = malloc(nb_process * sizeof(int*));
     ReservationRule** reservationRules = malloc(nb_process * sizeof(ReservationRule*));
     ReservationList** reservationLists = malloc(nb_process * sizeof(ReservationList*));
+    int** reservationListsResult = malloc(nb_process * sizeof(int*));
+	int** reservationListsElemResult = malloc(nb_process * sizeof(int*));
+	int** errors = malloc(nb_process * sizeof(int*)); // Store the current error
     
 	int depth = 0; // Current depth of the recursion
     for (int p = 0; p < nb_process; p++) {
 		result[p] = malloc(n * sizeof(int));
-		reservationListsResult[p] = malloc(n * sizeof(int));
 		rests[p] = malloc((n - 1) * sizeof(int*));
+		restsSizes[p] = malloc((n - 1) * sizeof(int));
 		reservationRules[p] = malloc((n - 1) * sizeof(ReservationRule));
 		reservationLists[p] = malloc((n - 1) * sizeof(ReservationList));
+		reservationListsResult[p] = malloc(n * sizeof(int));
+		reservationListsElemResult[p] = malloc(n * sizeof(int));
+		errors[p] = malloc(n * sizeof(int));
         for (int i = 0; i < n - 1; i++) {
             reservationRules[p][i].resList = -1;
-            initList(&(reservationLists[p][i].data), sizeof(int), 0);
+            initList(&(reservationLists[p][i].data), sizeof(int), 1);
             notChosenAnymore(nodes, n, i, reservationRules[p], reservationLists[p]);
-            rests[p][i] = malloc((n - i) * sizeof(int*));
+            rests[p][i] = malloc((n - i) * sizeof(int));
+			restsSizes[p][i] = n - i;
             rests[p][0][i] = i;
         }
     }
@@ -378,9 +418,10 @@ int main() {
     int starts[] = { 0 }; // Define the starts array
 	int end = 1;
 	int startsSize = 1;
-    try_sort(nb_process, nbItBefUpdErr, nbLeavesMax, repartTol, nodes, lowests, result, reservationListsResult, rests, reservationRules, reservationLists, n, &error, 0, &end, 0, &startsSize);
+    try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, lowests, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, 0, &error, 0, &end, 0, &startsSize);
+    int reste = startsSize % nb_process;
 	for (int rank = 0; rank < nb_process; rank++) {
-        try_sort(nb_process, nbItBefUpdErr, nbLeavesMax, repartTol, nodes, lowests, result, reservationListsResult, rests, reservationRules, reservationLists, n, &error, 1, &end, rank, &startsSize);
+        try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, lowests, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 1, &end, rank, &startsSize);
 	}
     // Free allocated memory
     for (int i = 0; i < n; i++) {
