@@ -94,6 +94,13 @@ void freeList(GenericList* list) {
     list->capacity = 0;
 }
 
+void notChosenUlt(Node* nodes, int i) {
+    for (int j = 0; j < nodes[i].ulteriors.size; j++) {
+        int ulterior = ((int*)nodes[i].ulteriors.data)[j];
+        nodes[ulterior].nbPost++;
+    }
+}
+
 void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
     if (nodes[i].highest < n - 1) {
         int highest = nodes[i].highest;
@@ -131,16 +138,13 @@ void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRul
             reservationRules[placeInd].all = (placeIndPrev != highest);
         }
     }
-    for (int j = 0; j < nodes[i].ulteriors.size; j++) {
-        int ulterior = ((int*)nodes[i].ulteriors.data)[j];
-        nodes[ulterior].nbPost--;
-    }
+	notChosenUlt(nodes, i);
 }
 
 void chosenUlt(Node* nodes, int rank, int depth, int*** rests, int** restsSizes, int i) {
     for (int j = 0; j < nodes[i].ulteriors.size; j++) {
         int ulterior = ((int*)nodes[i].ulteriors.data)[j];
-        nodes[ulterior].nbPost++;
+        nodes[ulterior].nbPost--;
         if (nodes[ulterior].nbPost == 0) {
             rests[rank][depth][restsSizes[rank][depth]] = i;
             restsSizes[rank][depth]++;
@@ -214,11 +218,6 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
                 if (mpiManagement == 0) {
                     errorCopy = min(*error, errorCopy);
                     befUpdErr = nbItBefUpdErr;
-                    // Print the sorted integers
-                    for (int i = 0; i < n; i++) {
-                        printf("%d ", rests[rank][i][result[rank][i]]);
-                    }
-                    printf("\n");
                     startInd++;
                     if (startInd == endStarts) {
                         return 0;
@@ -242,6 +241,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
                 for (int i = result[rank][depth - 1] + 1; i < restsSizes[rank][depth - 1]; i++) {
                     rests[rank][depth][i - 1] = rests[rank][depth - 1][i];
                 }
+				result[rank][depth] = restsSizes[rank][depth];
 			}
         }
         if (ascending == 0) {
@@ -268,7 +268,9 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
             }
             ascending = 1;
             depth--;
-            notChosenAnymore(nodes, n, rests[rank][depth][result[rank][depth]], reservationRules[rank], reservationLists[rank]);
+            int nodId = rests[rank][depth][result[rank][depth]];
+            notChosenAnymore(nodes, n, nodId, reservationRules[rank], reservationLists[rank]);
+            notChosenUlt(nodes, nodId);
         }
         for (int i = 0; i < lowests[depth].size; i++) {
 			chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)lowests[depth].data)[i]);
@@ -281,7 +283,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
                 }
                 result[rank][depth]--;
                 currentElement = rests[rank][depth][result[rank][depth]];
-                if (check_conditions(nodes, result[rank], n, currentElement) == 0) {
+                if (check_conditions(nodes, result[rank], n, currentElement) == 1) {
                     chosen(nodes, n, rank, depth, result, rests, restsSizes, currentElement, reservationRules[rank], reservationLists[rank]);
                     break;
                 }
@@ -339,16 +341,14 @@ int main() {
 
     // Dynamically allocate memory for the array of nodes
     Node* nodes = malloc(n * sizeof(Node));
-	GenericList* lowests = malloc((n - 1) * sizeof(GenericList));
+	GenericList* lowests = malloc(n * sizeof(GenericList));
 	AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
 
-    nodes[0].nbPost = 0;
     nodes[0].highest = 0;
     initList(&(nodes[0].ulteriors), sizeof(int), 1);
     nodes[0].conditions_size = 0;
     nodes[0].conditions = malloc(0 * sizeof(char*));
 
-    nodes[1].nbPost = 1;
     nodes[1].highest = 1;
     initList(&(nodes[1].ulteriors), sizeof(int), 1);
     int value = 0;
@@ -356,7 +356,6 @@ int main() {
     nodes[1].conditions_size = 0;
     nodes[1].conditions = malloc(0 * sizeof(char*));
 
-    nodes[2].nbPost = 1;
     nodes[2].highest = 2;
     initList(&(nodes[2].ulteriors), sizeof(int), 1);
     value = 0;
@@ -364,7 +363,6 @@ int main() {
     nodes[2].conditions_size = 0;
     nodes[2].conditions = malloc(0 * sizeof(char*));
 
-    nodes[3].nbPost = 2;
     nodes[3].highest = 3;
     initList(&(nodes[3].ulteriors), sizeof(int), 1);
 	value = 1;
@@ -375,7 +373,9 @@ int main() {
     nodes[3].conditions = malloc(0 * sizeof(char*));
 
     for (int i = 0; i < n; i++) {
+        nodes[i].nbPost = 0;
 		initList(&(lowests[i]), sizeof(int), 1);
+        notChosenUlt(nodes, i);
     }
 
 
@@ -398,8 +398,8 @@ int main() {
 	int depth = 0; // Current depth of the recursion
     for (int p = 0; p < nb_process; p++) {
 		result[p] = malloc(n * sizeof(int));
-		rests[p] = malloc((n - 1) * sizeof(int*));
-		restsSizes[p] = malloc((n - 1) * sizeof(int));
+		rests[p] = malloc(n * sizeof(int*));
+		restsSizes[p] = malloc(n * sizeof(int));
 		reservationRules[p] = malloc((n - 1) * sizeof(ReservationRule));
 		reservationLists[p] = malloc((n - 1) * sizeof(ReservationList));
 		reservationListsResult[p] = malloc(n * sizeof(int));
@@ -409,10 +409,16 @@ int main() {
             reservationRules[p][i].resList = -1;
             initList(&(reservationLists[p][i].data), sizeof(int), 1);
             notChosenAnymore(nodes, n, i, reservationRules[p], reservationLists[p]);
-            rests[p][i] = malloc((n - i) * sizeof(int));
-			restsSizes[p][i] = n - i;
-            rests[p][0][i] = i;
         }
+        for (int i = 0; i < n; i++) {
+            rests[p][i] = malloc((n - i) * sizeof(int));
+            restsSizes[p][i] = 0;
+            if (nodes[i].nbPost == 0) {
+                rests[p][0][restsSizes[p][0]] = i;
+                restsSizes[p][0]++;
+            }
+        }
+        result[p][0] = restsSizes[p][0];
     }
 	int error = 0;
     int starts[] = { 0 }; // Define the starts array
