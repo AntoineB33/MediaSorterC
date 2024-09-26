@@ -1,4 +1,4 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"  // Include the cJSON header
@@ -54,11 +54,12 @@ void addElement(GenericList* list, void* element) {
     // Check if the list is full and resize if needed
     if (list->size == list->capacity) {
         list->capacity *= 2;
-        list->data = realloc(list->data, list->capacity * list->elemSize);
-        if (list->data == NULL) {
+        void* newData = realloc(list->data, list->capacity * list->elemSize);
+        if (newData == NULL) {
             printf("Memory reallocation failed\n");
             exit(1);
         }
+        list->data = newData;
     }
     // Copy the new element into the list
     void* destination = (char*)list->data + (list->size * list->elemSize);
@@ -138,17 +139,13 @@ void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRul
             reservationRules[placeInd].all = (placeIndPrev != highest);
         }
     }
-	notChosenUlt(nodes, i);
 }
 
 void chosenUlt(Node* nodes, int rank, int depth, int*** rests, int** restsSizes, int i) {
-    for (int j = 0; j < nodes[i].ulteriors.size; j++) {
-        int ulterior = ((int*)nodes[i].ulteriors.data)[j];
-        nodes[ulterior].nbPost--;
-        if (nodes[ulterior].nbPost == 0) {
-            rests[rank][depth][restsSizes[rank][depth]] = i;
-            restsSizes[rank][depth]++;
-        }
+    nodes[i].nbPost--;
+    if (nodes[i].nbPost == 0) {
+        rests[rank][depth + 1][restsSizes[rank][depth + 1]] = i;
+        restsSizes[rank][depth + 1]++;
     }
 }
 
@@ -200,7 +197,7 @@ int check_conditions(Node* nodes, int* result, int n, int i) {
 int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* lowests, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
     int placeInd;
     int choiceInd;
-	int ascending = 1;
+	int ascending = 0;
     int found = 0;
     int currentElement;
 	int befUpdErr = nbItBefUpdErr;
@@ -209,68 +206,76 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
 	int startStarts = *startsSize * rank / nb_process + min(reste, rank);
     int endStarts = *startsSize * (rank + 1) / nb_process + min(reste, rank + 1);
     int startInd = 0;
-    int depth = -1;
+    int depth = 0;
     int endI = *end;
+    int restLeaves = nb_process;
     while (1) {
         if (ascending == 1) {
             depth++;
-            if (depth == endI) {
-                if (mpiManagement == 0) {
-                    errorCopy = min(*error, errorCopy);
-                    befUpdErr = nbItBefUpdErr;
-                    startInd++;
-                    if (startInd == endStarts) {
-                        return 0;
+			if(depth != 0) {
+                if (depth == endI) {
+                    if (mpiManagement == 0) {
+                        if (startInd == endStarts) {
+                            return 0;
+                        }
+                        if (startInd == startStarts) {
+                            endI = n;
+                        }
+                        startInd++;
                     }
-                    if (startInd == startStarts) {
-                        endI = n;
+                    else {
+                        if (nbLeaves == nbLeavesMax) {
+                            return 0;
+                        }
+                        nbLeaves++;
+                        ascending = 0;
                     }
                 }
-                else {
-                    if (nbLeaves == nbLeavesMax) {
-                        return 0;
+                if (ascending == 1) {
+                    for (int i = 0; i < result[rank][depth - 1]; i++) {
+                        rests[rank][depth][i] = rests[rank][depth - 1][i];
                     }
-                    nbLeaves++;
+                    for (int i = result[rank][depth - 1] + 1; i < restsSizes[rank][depth - 1]; i++) {
+                        rests[rank][depth][i - 1] = rests[rank][depth - 1][i];
+                    }
+                    result[rank][depth] = restsSizes[rank][depth];
                 }
-                ascending = 0;
-			}
-			else if(depth != 0) {
-                for (int i = 0; i < result[rank][depth - 1]; i++) {
-                    rests[rank][depth][i] = rests[rank][depth - 1][i];
-                }
-                for (int i = result[rank][depth - 1] + 1; i < restsSizes[rank][depth - 1]; i++) {
-                    rests[rank][depth][i - 1] = rests[rank][depth - 1][i];
-                }
-				result[rank][depth] = restsSizes[rank][depth];
 			}
         }
         if (ascending == 0) {
+            ascending = 1;
 			befUpdErr--;
 			if (befUpdErr == 0) {
                 errorCopy = min(*error, errorCopy);
 				befUpdErr = nbItBefUpdErr;
 			}
             if (depth == 0) {
-                if (mpiManagement == 1) {
-					if (nbLeaves % nb_process >= *startsSize % nb_process) {
-						*startsSize = nbLeaves;
-                        *end = endI;
-                        if (nbLeaves % nb_process == 0 || (nbLeaves % nb_process) / nb_process <= repartTol && nbLeaves > nbLeavesMin) {
-                            return 0;
+                if (nbLeaves != 0) {
+                    if (mpiManagement == 0) {
+                        return 0;
+                    }
+                    else {
+                        int restLeaves2 = nbLeaves % nb_process;
+                        if (restLeaves2 <= restLeaves) {
+                            if (restLeaves2 == 0 || nbLeaves > nbLeavesMin && restLeaves2 <= repartTol * nb_process) {
+                                return 0;
+                            }
+                            *startsSize = nbLeaves;
+                            *end = endI;
+                            restLeaves = restLeaves2;
+                            nbLeaves = 0;
                         }
-					}
-                    endI++;
-                    depth++;
-				}
-                else {
-                    break;
+                        endI++;
+                    }
                 }
+                result[rank][0] = restsSizes[rank][0];
+            } 
+            else {
+                depth--;
+                int nodId = rests[rank][depth][result[rank][depth]];
+                notChosenAnymore(nodes, n, nodId, reservationRules[rank], reservationLists[rank]);
+                notChosenUlt(nodes, nodId);
             }
-            ascending = 1;
-            depth--;
-            int nodId = rests[rank][depth][result[rank][depth]];
-            notChosenAnymore(nodes, n, nodId, reservationRules[rank], reservationLists[rank]);
-            notChosenUlt(nodes, nodId);
         }
         for (int i = 0; i < lowests[depth].size; i++) {
 			chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)lowests[depth].data)[i]);
@@ -328,7 +333,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
 int main() {
 
 	// Define the parameters
-	int nbItBefUpdErr = 3; // Define the number of iterations before updating the error
+	int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
 	int nbLeavesMin = 100; // Define the minimum time to sort
 	int nbLeavesMax = 1000; // Define the maximum time to sort
 	float repartTol = 0.1; // Define the repartition tolerance
@@ -359,7 +364,7 @@ int main() {
     nodes[2].highest = 2;
     initList(&(nodes[2].ulteriors), sizeof(int), 1);
     value = 0;
-    addElement(&(nodes[1].ulteriors), &value);
+    addElement(&(nodes[2].ulteriors), &value);
     nodes[2].conditions_size = 0;
     nodes[2].conditions = malloc(0 * sizeof(char*));
 
@@ -407,7 +412,13 @@ int main() {
 		errors[p] = malloc(n * sizeof(int));
         for (int i = 0; i < n - 1; i++) {
             reservationRules[p][i].resList = -1;
-            initList(&(reservationLists[p][i].data), sizeof(int), 1);
+            if (reservationLists[p] != NULL) {
+                initList(&(reservationLists[p][i].data), sizeof(int), 1);
+            }
+            else {
+                printf("Error: reservationLists[%d] is NULL\n", p);
+                exit(1);
+            }
             notChosenAnymore(nodes, n, i, reservationRules[p], reservationLists[p]);
         }
         for (int i = 0; i < n; i++) {
@@ -418,16 +429,19 @@ int main() {
                 restsSizes[p][0]++;
             }
         }
-        result[p][0] = restsSizes[p][0];
     }
 	int error = 0;
     int starts[] = { 0 }; // Define the starts array
 	int end = 1;
-	int startsSize = 1;
-    try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, lowests, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, 0, &error, 0, &end, 0, &startsSize);
+	int startsSize = -1;
+    try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, lowests, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, 0, &error, 1, &end, 0, &startsSize);
+    if (startsSize == -1) {
+		printf("Error: startsSize is -1\n");
+		return 1;
+    }
     int reste = startsSize % nb_process;
 	for (int rank = 0; rank < nb_process; rank++) {
-        try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, lowests, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 1, &end, rank, &startsSize);
+        try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, lowests, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 0, &end, rank, &startsSize);
 	}
     // Free allocated memory
     for (int i = 0; i < n; i++) {
