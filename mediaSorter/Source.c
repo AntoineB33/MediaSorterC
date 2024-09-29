@@ -195,7 +195,6 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
     int endI = *end;
     int restLeaves = nb_process;
     int nodId;
-	int isFirst = 1;
     while (1) {
         if (ascending == 1) {
             depth++;
@@ -258,23 +257,25 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
 
             result[rank][depth] = restsSizes[rank][depth];
 
+            if (depth == n) {
+                for (int i = 0; i < n; i++) {
+                    if (reservationListsResult[rank][i] == -1) {
+                        nodId = rests[rank][i][result[rank][i]];
+                    }
+                    else {
+                        nodId = ((int*)reservationLists[rank][reservationListsResult[rank][i]].data.data)[reservationListsElemResult[rank][i]];
+                    }
+                    printf("%d ", nodId);
+                }
+                printf("\n\n\n");
+            }
             if (depth == endI) {
                 if (mpiManagement == 0) {
                     if (startInd == endStarts) {
-                        for (int i = 0; i < n; i++) {
-                            if (reservationListsResult[rank][i] == -1) {
-                                nodId = rests[rank][i][result[rank][i]];
-                            }
-                            else {
-                                nodId = ((int*)reservationLists[rank][reservationListsResult[rank][i]].data.data)[reservationListsElemResult[rank][i]];
-                            }
-                            printf("%d ", nodId);
-                        }
-                        printf("\n\n\n");
                         return 0;
                     }
-                    if (startInd == startStarts) {
-                        endI = n;
+                    if (startInd < startStarts) {
+                        ascending = 0;
                     }
                     startInd++;
                 }
@@ -295,7 +296,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
 				befUpdErr = nbItBefUpdErr;
 			}
             if (depth == 0) {
-                if (nbLeaves != 0) {
+                if (nbLeaves!=0) {
                     int restLeaves2 = nbLeaves % nb_process;
                     if (restLeaves2 <= restLeaves) {
                         if (nbLeaves > nbLeavesMin && restLeaves2 <= repartTol * nb_process) {
@@ -432,7 +433,7 @@ int main() {
     nodes[1].conditions_size = 0;
     nodes[1].conditions = malloc(0 * sizeof(char*));
 
-    nodes[2].highest = 1;
+    nodes[2].highest = -1;
     initList(&(nodes[2].ulteriors), sizeof(int), 1);
     value = 0;
     addElement(&(nodes[2].ulteriors), &value);
