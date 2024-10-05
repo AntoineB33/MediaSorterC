@@ -44,6 +44,7 @@
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
+    <EnableASAN>true</EnableASAN>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -102,12 +103,21 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions);SDL_MAIN_HANDLED
+</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <CompileAs>CompileAsC</CompileAs>
+      <AdditionalIncludeDirectories>C:\dev\cjson;C:\dev\SDL2-devel-2.30.8-VC\SDL2-2.30.8\include;C:/dev/FFmpeg-master/FFmpeg-master</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>swscale.lib
+;avcodec.lib
+;avformat.lib;
+avutil.lib
+;%(AdditionalDependencies);C:\dev\SDL2-devel-2.30.8-VC\SDL2-2.30.8\lib\x64\SDL2.lib;C:\dev\SDL2-devel-2.30.8-VC\SDL2-2.30.8\lib\x64\SDL2main.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\dev\FFmpeg-master\FFmpeg-master\libswresample;C:\dev\FFmpeg-master\FFmpeg-master\libavcodec;C:\dev\FFmpeg-master\FFmpeg-master\libavformat;C:\dev\FFmpeg-master\FFmpeg-master\libavutil;C:\dev\FFmpeg-master\FFmpeg-master\libswscale;C:\dev\SDL2-devel-2.30.8-VC\SDL2-2.30.8\lib</AdditionalLibraryDirectories>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -127,6 +137,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\..\..\..\..\..\..\..\dev\cjson\cJSON.c" />
     <ClCompile Include="Source.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
