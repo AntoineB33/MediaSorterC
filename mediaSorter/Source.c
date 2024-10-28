@@ -95,6 +95,80 @@ void freeList(GenericList* list) {
     list->capacity = 0;
 }
 
+void freeNode(Node* node) {
+    freeList(&node->ulteriors);
+    for (int i = 0; i < node->conditions_size; i++) {
+        free(node->conditions[i]);
+    }
+    free(node->conditions);
+}
+
+void freeNodes(Node* nodes, size_t nodeCount) {
+    for (size_t i = 0; i < nodeCount; i++) {
+        freeNode(&nodes[i]);
+    }
+    free(nodes);
+}
+
+void parseJSONToNode(Node** nodes, int* n, const char* filename) {
+    // Open the JSON file
+    FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.json", "r");
+    if (file == NULL) {
+        perror("Unable to open file");
+        return 1;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+
+    // Read the file into a string
+    char* json_data = (char*)malloc(file_size + 1);
+    fread(json_data, 1, file_size, file);
+    fclose(file);
+    json_data[file_size] = '\0';
+
+    // Parse JSON data
+    cJSON* json = cJSON_Parse(json_data);
+    if (json == NULL) {
+        printf("Error parsing JSON\n");
+        free(json_data);
+        return 1;
+    }
+
+    *n = cJSON_GetArraySize(json);
+    *nodes = malloc(*n * sizeof(Node));
+    for (size_t i = 0; i < *n; i++) {
+        Node* node = &(*nodes)[i];
+        cJSON* nodeJson = cJSON_GetArrayItem(json, i);
+
+        // Parse ulteriors array
+        cJSON* ulteriorsJson = cJSON_GetObjectItem(nodeJson, "ulteriors");
+        int ulteriorsCount = cJSON_GetArraySize(ulteriorsJson);
+        initList(&node->ulteriors, sizeof(int), ulteriorsCount);
+        for (int j = 0; j < ulteriorsCount; j++) {
+            int ulterior = cJSON_GetArrayItem(ulteriorsJson, j)->valueint;
+            addElement(&node->ulteriors, &ulterior);
+        }
+
+        // Parse conditions array
+        cJSON* conditionsJson = cJSON_GetObjectItem(nodeJson, "conditions");
+        node->conditions_size = cJSON_GetArraySize(conditionsJson);
+        node->conditions = (char**)malloc(node->conditions_size * sizeof(char*));
+        for (int j = 0; j < node->conditions_size; j++) {
+            const char* condition = cJSON_GetArrayItem(conditionsJson, j)->valuestring;
+            node->conditions[j] = _strdup(condition);
+        }
+
+        // Parse nbPost and highest
+        node->nbPost = cJSON_GetObjectItem(nodeJson, "nbPost")->valueint;
+        node->highest = cJSON_GetObjectItem(nodeJson, "highest")->valueint;
+    }
+
+    cJSON_Delete(json);
+}
+
 void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
     if (nodes[i].highest != -1) {
         int highest = nodes[i].highest;
@@ -258,12 +332,20 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
             result[rank][depth] = restsSizes[rank][depth];
 
             if (depth == n) {
+
+                // Open the file in write mode
+                FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/overwatch_order.txt", "w");
+
                 for (int i = 0; i < n; i++) {
                     if (reservationListsResult[rank][i] == -1) {
                         nodId = rests[rank][i][result[rank][i]];
                     }
                     else {
                         nodId = ((int*)reservationLists[rank][reservationListsResult[rank][i]].data.data)[reservationListsElemResult[rank][i]];
+                    }
+                    // Write each integer to the file, one per line
+                    for (int i = 0; i < n; i++) {
+                        fprintf(file, "%d\n", nodId);
                     }
                     printf("%d ", nodId);
                 }
@@ -401,25 +483,60 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
     }
 }
 
+
 int main() {
 
-	// Define the parameters
-	int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
-	int nbLeavesMin = 100; // Define the minimum time to sort
-	int nbLeavesMax = 1000; // Define the maximum time to sort
-	float repartTol = 0.1; // Define the repartition tolerance
+
+
+    // Define the parameters
+    int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
+    int nbLeavesMin = 100; // Define the minimum time to sort
+    int nbLeavesMax = 1000; // Define the maximum time to sort
+    float repartTol = 0.1; // Define the repartition tolerance
 
 
     // example of nodes, startExcl, endExcl and attributeMngs
 
-    int n = 4; // Define the number of integers to sort
+    int n; // Define the number of integers to sort
     int nb_att = 0; // Define the number of attributes
 
     // Dynamically allocate memory for the array of nodes
-    Node* nodes = malloc(n * sizeof(Node));
+    Node* nodes;
+
+
+
+    Node node;
+    parseJSONToNode(&nodes, &n, "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.json");
+
+
+    for (size_t i = 0; i < n; i++) {
+        Node* node = &nodes[i];
+        printf("Node %zu:\n", i + 1);
+
+        printf("  Ulteriors: ");
+        for (size_t j = 0; j < node->ulteriors.size; j++) {
+            int* value = (int*)((char*)node->ulteriors.data + j * sizeof(int));
+            printf("%d ", *value);
+        }
+        printf("\n");
+
+        printf("  Conditions: ");
+        for (int j = 0; j < node->conditions_size; j++) {
+            printf("%s ", node->conditions[j]);
+        }
+        printf("\n");
+
+        printf("  nbPost: %d\n", node->nbPost);
+        printf("  highest: %d\n", node->highest);
+    }
+
+    freeNodes(nodes, n);
+    return 0;
+
+
     GenericList* startExcl = malloc((n + 1) * sizeof(GenericList));
     GenericList* endExcl = malloc((n + 1) * sizeof(GenericList));
-	AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
+    AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
 
     nodes[0].highest = -1;
     initList(&(nodes[0].ulteriors), sizeof(int), 1);
