@@ -2,7 +2,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"  // Include the cJSON header
+#include <curl/curl.h>
+#include <stdarg.h>
 
+
+#define URL "http://localhost:3000/execute"
+
+
+// Define an enumeration for argument types
+typedef enum {
+    TYPE_STRING,
+    TYPE_INT,
+    TYPE_LIST_INT,
+    TYPE_LIST_STRING
+} ArgType;
 
 typedef struct {
     void* data;       // Pointer to the array (generic list)
@@ -99,6 +112,7 @@ void freeNode(Node* node) {
     freeList(&node->ulteriors);
     for (int i = 0; i < node->conditions_size; i++) {
         free(node->conditions[i]);
+		freeList(&node->ulteriors);
     }
     free(node->conditions);
 }
@@ -336,6 +350,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
                 // Open the file in write mode
                 FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/overwatch_order.txt", "w");
 
+				int* nodIds = malloc(n * sizeof(int));
                 for (int i = 0; i < n; i++) {
                     if (reservationListsResult[rank][i] == -1) {
                         nodId = rests[rank][i][result[rank][i]];
@@ -343,13 +358,14 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
                     else {
                         nodId = ((int*)reservationLists[rank][reservationListsResult[rank][i]].data.data)[reservationListsElemResult[rank][i]];
                     }
-                    // Write each integer to the file, one per line
-                    for (int i = 0; i < n; i++) {
-                        fprintf(file, "%d\n", nodId);
-                    }
+					nodIds[i] = nodId;
+                    fprintf(file, "%d\n", nodId);
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
+                call_JS_endpoint("better sorting",
+                    TYPE_LIST_INT, "myList1", nodIds, n,
+                    -1);
             }
             if (depth == endI) {
                 if (mpiManagement == 0) {
@@ -483,8 +499,142 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
     }
 }
 
+void call_JS_endpoint(const char* functionName, ...) {
+    // Get the current timestamp
+    time_t t = time(NULL);
+    struct tm tm = *localtime(&t);
+    char timestamp[100];
+    snprintf(timestamp, sizeof(timestamp), "%d-%02d-%02d %02d:%02d:%02d",
+        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+        tm.tm_hour, tm.tm_min, tm.tm_sec);
 
-int main() {
+    CURL* curl;
+    CURLcode res;
+
+    // Initialize curl
+    curl = curl_easy_init();
+    if (curl) {
+        // Create JSON payload
+        char json_payload[2048]; // Increased size for longer payloads
+        snprintf(json_payload, sizeof(json_payload), "{\"timestamp\":\"%s\", \"functionName\":\"%s\"", timestamp, functionName);
+
+        // Use va_list to process variable arguments
+        va_list args;
+        va_start(args, functionName);
+
+        // Iterate through the arguments and build the JSON string
+        int arg_count = 0;
+        while (1) {
+            ArgType type = va_arg(args, ArgType); // Get the type of the next argument
+            if (type == -1) break; // Use -1 to signal the end of arguments
+
+            if (type == TYPE_STRING) {
+                const char* str_value = va_arg(args, const char*);
+                if (arg_count > 0) {
+                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
+                }
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":\"%s\"", str_value, str_value);
+                arg_count++;
+            }
+            else if (type == TYPE_INT) {
+                const char* int_key = va_arg(args, const char*);
+                int int_value = va_arg(args, int);
+                if (arg_count > 0) {
+                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
+                }
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":%d", int_key, int_value);
+                arg_count++;
+            }
+            else if (type == TYPE_LIST_INT) {
+                const char* list_key = va_arg(args, const char*);
+                int* int_list = va_arg(args, int*); // Get the integer list
+                int list_size = va_arg(args, int); // Get the size of the list
+
+                if (arg_count > 0) {
+                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
+                }
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
+
+                for (int i = 0; i < list_size; i++) {
+                    if (i > 0) {
+                        strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent items
+                    }
+                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "%d", int_list[i]);
+                }
+                strncat(json_payload, "]", sizeof(json_payload) - strlen(json_payload) - 1); // Close the list
+                arg_count++;
+            }
+            else if (type == TYPE_LIST_STRING) {
+                const char* list_key = va_arg(args, const char*);
+                char** str_list = va_arg(args, char**); // Get the string list
+                int list_size = va_arg(args, int); // Get the size of the list
+
+                if (arg_count > 0) {
+                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
+                }
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
+
+                for (int i = 0; i < list_size; i++) {
+                    if (i > 0) {
+                        strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent items
+                    }
+                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload) - 1, "\"%s\"", str_list[i]);
+                }
+                strncat(json_payload, "]", sizeof(json_payload) - strlen(json_payload) - 1); // Close the list
+                arg_count++;
+            }
+        }
+
+        // Closing the JSON object
+        strncat(json_payload, "}", sizeof(json_payload) - strlen(json_payload) - 1);
+
+        // Set the URL
+        curl_easy_setopt(curl, CURLOPT_URL, URL);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
+
+        // Set headers for JSON content
+        struct curl_slist* headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+        // Perform the request
+        res = curl_easy_perform(curl);
+
+        // Check for errors
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        // Cleanup
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+}
+
+// Function to concatenate two strings dynamically
+char* concatenate(const char* str1, const char* str2) {
+    // Calculate the length of the new string
+    size_t len1 = strlen(str1);
+    size_t len2 = strlen(str2);
+    size_t total_length = len1 + len2 + 1; // +1 for the null terminator
+
+    // Allocate memory for the new string
+    char* result = (char*)malloc(total_length * sizeof(char));
+    if (result == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        exit(1); // Exit if allocation fails
+    }
+
+    // Copy the first string into the result
+    strcpy(result, str1);
+    // Concatenate the second string
+    strcat(result, str2);
+
+    return result; // Return the concatenated string
+}
+
+int main(int argc, char* argv[]) {
+	// TODO : Check if sortings of similar systems already exist
 
 
 
@@ -506,7 +656,9 @@ int main() {
 
 
     Node node;
-    parseJSONToNode(&nodes, &n, "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.json");
+    char* path = concatenate("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/", argv[1]);
+    path = concatenate(path, ".json");
+    parseJSONToNode(&nodes, &n, path);
 
 
     for (size_t i = 0; i < n; i++) {
@@ -530,15 +682,15 @@ int main() {
         printf("  highest: %d\n", node->highest);
     }
 
-    freeNodes(nodes, n);
-    return 0;
+    /*freeNodes(nodes, n);
+    return 0;*/
 
 
     GenericList* startExcl = malloc((n + 1) * sizeof(GenericList));
     GenericList* endExcl = malloc((n + 1) * sizeof(GenericList));
     AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
 
-    nodes[0].highest = -1;
+    /*nodes[0].highest = -1;
     initList(&(nodes[0].ulteriors), sizeof(int), 1);
     nodes[0].conditions_size = 0;
     nodes[0].conditions = malloc(0 * sizeof(char*));
@@ -564,7 +716,7 @@ int main() {
 	value = 2;
 	addElement(&(nodes[3].ulteriors), &value);
     nodes[3].conditions_size = 0;
-    nodes[3].conditions = malloc(0 * sizeof(char*));
+    nodes[3].conditions = malloc(0 * sizeof(char*));*/
 
     for (int i = 0; i < n + 1; i++) {
         initList(&(startExcl[i]), sizeof(int), 1);
@@ -641,12 +793,11 @@ int main() {
 	for (int rank = 0; rank < nb_process; rank++) {
         try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 0, &end, rank, &startsSize);
 	}
-    // Free allocated memory
-    for (int i = 0; i < n; i++) {
-		freeList(&(nodes[i].ulteriors));
-    }
-    free(nodes);
     free(result);
+    freeNodes(nodes, n);
+
+    call_JS_endpoint("C stops sorting",
+        -1);
 
     return 0;
 }
