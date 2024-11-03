@@ -267,7 +267,7 @@ void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests,
 }
 
 // Recursive function to try all possible ways to sort the integer
-int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* startExcl, GenericList* endExcl, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
+int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* startExcl, GenericList* endExcl, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
     int placeInd;
     int choiceInd;
 	int ascending = 0;
@@ -363,7 +363,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
-                call_JS_endpoint("better sorting",
+                call_JS_endpoint("better sorting", sheetCodeName,
                     TYPE_LIST_INT, "myList1", nodIds, n,
                     -1);
             }
@@ -499,7 +499,7 @@ int try_sort(int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax
     }
 }
 
-void call_JS_endpoint(const char* functionName, ...) {
+void call_JS_endpoint(const char* functionName, char* sheetCodeName, ...) {
     // Get the current timestamp
     time_t t = time(NULL);
     struct tm tm = *localtime(&t);
@@ -516,7 +516,7 @@ void call_JS_endpoint(const char* functionName, ...) {
     if (curl) {
         // Create JSON payload
         char json_payload[2048]; // Increased size for longer payloads
-        snprintf(json_payload, sizeof(json_payload), "{\"timestamp\":\"%s\", \"functionName\":\"%s\"", timestamp, functionName);
+        snprintf(json_payload, sizeof(json_payload), "{\"timestamp\":\"%s\", \"functionName\":\"%s\", \"sheetCodeName\":\"%s\"", timestamp, functionName, sheetCodeName);
 
         // Use va_list to process variable arguments
         va_list args;
@@ -784,19 +784,19 @@ int main(int argc, char* argv[]) {
     int starts[] = { 0 }; // Define the starts array
 	int end = 1;
 	int startsSize = -1;
-    try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, 0, &error, 1, &end, 0, &startsSize);
+    try_sort(argv[1], nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, 0, &error, 1, &end, 0, &startsSize);
     if (startsSize == -1) {
 		printf("Error: startsSize is -1\n");
 		return 1;
     }
     int reste = startsSize % nb_process;
 	for (int rank = 0; rank < nb_process; rank++) {
-        try_sort(nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 0, &end, rank, &startsSize);
+        try_sort(argv[1], nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 0, &end, rank, &startsSize);
 	}
     free(result);
     freeNodes(nodes, n);
 
-    call_JS_endpoint("C stops sorting",
+    call_JS_endpoint("C stops sorting", argv[1],
         -1);
 
     return 0;
