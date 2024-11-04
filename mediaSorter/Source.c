@@ -129,8 +129,9 @@ void parseJSONToNode(Node** nodes, int* n, const char* filename) {
     FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.json", "r");
     if (file == NULL) {
         perror("Unable to open file");
-        return 1;
+        return;
     }
+
 
     // Get file size
     fseek(file, 0, SEEK_END);
@@ -148,7 +149,7 @@ void parseJSONToNode(Node** nodes, int* n, const char* filename) {
     if (json == NULL) {
         printf("Error parsing JSON\n");
         free(json_data);
-        return 1;
+        return;
     }
 
     *n = cJSON_GetArraySize(json);
@@ -159,7 +160,7 @@ void parseJSONToNode(Node** nodes, int* n, const char* filename) {
 
         // Parse ulteriors array
         cJSON* ulteriorsJson = cJSON_GetObjectItem(nodeJson, "ulteriors");
-        int ulteriorsCount = cJSON_GetArraySize(ulteriorsJson);
+        int ulteriorsCount = (int)cJSON_GetArraySize(ulteriorsJson);
         initList(&node->ulteriors, sizeof(int), ulteriorsCount);
         for (int j = 0; j < ulteriorsCount; j++) {
             int ulterior = cJSON_GetArrayItem(ulteriorsJson, j)->valueint;
@@ -263,6 +264,115 @@ void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests,
             }
             k--;
         }
+    }
+}
+
+
+void call_JS_endpoint(const char* functionName, char* sheetCodeName, ...) {
+    // Get the current timestamp
+    time_t t = time(NULL);
+    struct tm tm = *localtime(&t);
+    char timestamp[100];
+    snprintf(timestamp, sizeof(timestamp), "%d-%02d-%02d %02d:%02d:%02d",
+        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+        tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+    CURL* curl;
+    CURLcode res;
+
+    // Initialize curl
+    curl = curl_easy_init();
+    if (curl) {
+        // Create JSON payload
+        char json_payload[2048]; // Increased size for longer payloads
+        snprintf(json_payload, sizeof(json_payload), "{\"timestamp\":\"%s\", \"functionName\":\"%s\", \"sheetCodeName\":\"%s\"", timestamp, functionName, sheetCodeName);
+
+        // Use va_list to process variable arguments
+        va_list args;
+        va_start(args, functionName);
+
+        // Iterate through the arguments and build the JSON string
+        int arg_count = 0;
+        while (1) {
+            ArgType type = va_arg(args, ArgType); // Get the type of the next argument
+            if (type == -1) break; // Use -1 to signal the end of arguments
+
+            if (type == TYPE_STRING) {
+                const char* str_value = va_arg(args, const char*);
+                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":\"%s\"", str_value, str_value);
+                arg_count++;
+            }
+            else if (type == TYPE_INT) {
+                const char* int_key = va_arg(args, const char*);
+                int int_value = va_arg(args, int);
+
+                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
+
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":%d", int_key, int_value);
+                arg_count++;
+            }
+            else if (type == TYPE_LIST_INT) {
+                const char* list_key = va_arg(args, const char*);
+                int* int_list = va_arg(args, int*); // Get the integer list
+                int list_size = va_arg(args, int); // Get the size of the list
+
+                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
+
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
+
+                for (int i = 0; i < list_size; i++) {
+                    if (i > 0) {
+                        strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent items
+                    }
+                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "%d", int_list[i]);
+                }
+                strncat_s(json_payload, sizeof(json_payload), "]", _TRUNCATE); // Close the list
+                arg_count++;
+            }
+            else if (type == TYPE_LIST_STRING) {
+                const char* list_key = va_arg(args, const char*);
+                char** str_list = va_arg(args, char**); // Get the string list
+                int list_size = va_arg(args, int); // Get the size of the list
+
+                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
+
+                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
+
+                for (int i = 0; i < list_size; i++) {
+                    if (i > 0) {
+                        strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent items
+                    }
+                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\"", str_list[i]);
+                }
+                strncat_s(json_payload, sizeof(json_payload), "]", _TRUNCATE); // Close the list
+                arg_count++;
+            }
+        }
+
+        // Closing the JSON object
+        strncat_s(json_payload, sizeof(json_payload), "}", _TRUNCATE);
+
+        // Set the URL
+        curl_easy_setopt(curl, CURLOPT_URL, URL);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
+
+        // Set headers for JSON content
+        struct curl_slist* headers = NULL;
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+        // Perform the request
+        res = curl_easy_perform(curl);
+
+        // Check for errors
+        if (res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+        }
+
+        // Cleanup
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
     }
 }
 
@@ -499,119 +609,6 @@ int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeaves
     }
 }
 
-void call_JS_endpoint(const char* functionName, char* sheetCodeName, ...) {
-    // Get the current timestamp
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
-    char timestamp[100];
-    snprintf(timestamp, sizeof(timestamp), "%d-%02d-%02d %02d:%02d:%02d",
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-        tm.tm_hour, tm.tm_min, tm.tm_sec);
-
-    CURL* curl;
-    CURLcode res;
-
-    // Initialize curl
-    curl = curl_easy_init();
-    if (curl) {
-        // Create JSON payload
-        char json_payload[2048]; // Increased size for longer payloads
-        snprintf(json_payload, sizeof(json_payload), "{\"timestamp\":\"%s\", \"functionName\":\"%s\", \"sheetCodeName\":\"%s\"", timestamp, functionName, sheetCodeName);
-
-        // Use va_list to process variable arguments
-        va_list args;
-        va_start(args, functionName);
-
-        // Iterate through the arguments and build the JSON string
-        int arg_count = 0;
-        while (1) {
-            ArgType type = va_arg(args, ArgType); // Get the type of the next argument
-            if (type == -1) break; // Use -1 to signal the end of arguments
-
-            if (type == TYPE_STRING) {
-                const char* str_value = va_arg(args, const char*);
-                if (arg_count > 0) {
-                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
-                }
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":\"%s\"", str_value, str_value);
-                arg_count++;
-            }
-            else if (type == TYPE_INT) {
-                const char* int_key = va_arg(args, const char*);
-                int int_value = va_arg(args, int);
-                if (arg_count > 0) {
-                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
-                }
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":%d", int_key, int_value);
-                arg_count++;
-            }
-            else if (type == TYPE_LIST_INT) {
-                const char* list_key = va_arg(args, const char*);
-                int* int_list = va_arg(args, int*); // Get the integer list
-                int list_size = va_arg(args, int); // Get the size of the list
-
-                if (arg_count > 0) {
-                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
-                }
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
-
-                for (int i = 0; i < list_size; i++) {
-                    if (i > 0) {
-                        strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent items
-                    }
-                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "%d", int_list[i]);
-                }
-                strncat(json_payload, "]", sizeof(json_payload) - strlen(json_payload) - 1); // Close the list
-                arg_count++;
-            }
-            else if (type == TYPE_LIST_STRING) {
-                const char* list_key = va_arg(args, const char*);
-                char** str_list = va_arg(args, char**); // Get the string list
-                int list_size = va_arg(args, int); // Get the size of the list
-
-                if (arg_count > 0) {
-                    strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent pairs
-                }
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
-
-                for (int i = 0; i < list_size; i++) {
-                    if (i > 0) {
-                        strncat(json_payload, ", ", sizeof(json_payload) - strlen(json_payload) - 1); // Add a comma for subsequent items
-                    }
-                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload) - 1, "\"%s\"", str_list[i]);
-                }
-                strncat(json_payload, "]", sizeof(json_payload) - strlen(json_payload) - 1); // Close the list
-                arg_count++;
-            }
-        }
-
-        // Closing the JSON object
-        strncat(json_payload, "}", sizeof(json_payload) - strlen(json_payload) - 1);
-
-        // Set the URL
-        curl_easy_setopt(curl, CURLOPT_URL, URL);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
-
-        // Set headers for JSON content
-        struct curl_slist* headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-        // Perform the request
-        res = curl_easy_perform(curl);
-
-        // Check for errors
-        if (res != CURLE_OK) {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        }
-
-        // Cleanup
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-    }
-}
-
-// Function to concatenate two strings dynamically
 char* concatenate(const char* str1, const char* str2) {
     // Calculate the length of the new string
     size_t len1 = strlen(str1);
@@ -625,10 +622,10 @@ char* concatenate(const char* str1, const char* str2) {
         exit(1); // Exit if allocation fails
     }
 
-    // Copy the first string into the result
-    strcpy(result, str1);
-    // Concatenate the second string
-    strcat(result, str2);
+    // Copy the first string into the result with buffer size `total_length`
+    strcpy_s(result, total_length, str1);
+    // Concatenate the second string into result with buffer size `total_length`
+    strcat_s(result, total_length, str2);
 
     return result; // Return the concatenated string
 }
@@ -637,12 +634,11 @@ int main(int argc, char* argv[]) {
 	// TODO : Check if sortings of similar systems already exist
 
 
-
     // Define the parameters
     int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
     int nbLeavesMin = 100; // Define the minimum time to sort
     int nbLeavesMax = 1000; // Define the maximum time to sort
-    float repartTol = 0.1; // Define the repartition tolerance
+    float repartTol = 0.1f; // Define the repartition tolerance
 
 
     // example of nodes, startExcl, endExcl and attributeMngs
