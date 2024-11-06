@@ -5,17 +5,19 @@
 #include <curl/curl.h>
 #include <stdarg.h>
 
+//#include <windows.h>
+//#include <oleauto.h>
+//#include <comutil.h>
+////#include <time.h>
 
-#define URL "http://localhost:3000/execute"
+#include <Python.h>
 
 
-// Define an enumeration for argument types
-typedef enum {
-    TYPE_STRING,
-    TYPE_INT,
-    TYPE_LIST_INT,
-    TYPE_LIST_STRING
-} ArgType;
+#define TYPE_INT 1
+#define TYPE_STRING 2
+#define TYPE_LIST_INT 3
+#define TYPE_END -1
+
 
 typedef struct {
     void* data;       // Pointer to the array (generic list)
@@ -267,115 +269,6 @@ void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests,
     }
 }
 
-
-void call_JS_endpoint(const char* functionName, char* sheetCodeName, ...) {
-    // Get the current timestamp
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
-    char timestamp[100];
-    snprintf(timestamp, sizeof(timestamp), "%d-%02d-%02d %02d:%02d:%02d",
-        tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-        tm.tm_hour, tm.tm_min, tm.tm_sec);
-
-    CURL* curl;
-    CURLcode res;
-
-    // Initialize curl
-    curl = curl_easy_init();
-    if (curl) {
-        // Create JSON payload
-        char json_payload[2048]; // Increased size for longer payloads
-        snprintf(json_payload, sizeof(json_payload), "{\"timestamp\":\"%s\", \"functionName\":\"%s\", \"sheetCodeName\":\"%s\"", timestamp, functionName, sheetCodeName);
-
-        // Use va_list to process variable arguments
-        va_list args;
-        va_start(args, functionName);
-
-        // Iterate through the arguments and build the JSON string
-        int arg_count = 0;
-        while (1) {
-            ArgType type = va_arg(args, ArgType); // Get the type of the next argument
-            if (type == -1) break; // Use -1 to signal the end of arguments
-
-            if (type == TYPE_STRING) {
-                const char* str_value = va_arg(args, const char*);
-                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":\"%s\"", str_value, str_value);
-                arg_count++;
-            }
-            else if (type == TYPE_INT) {
-                const char* int_key = va_arg(args, const char*);
-                int int_value = va_arg(args, int);
-
-                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
-
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":%d", int_key, int_value);
-                arg_count++;
-            }
-            else if (type == TYPE_LIST_INT) {
-                const char* list_key = va_arg(args, const char*);
-                int* int_list = va_arg(args, int*); // Get the integer list
-                int list_size = va_arg(args, int); // Get the size of the list
-
-                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
-
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
-
-                for (int i = 0; i < list_size; i++) {
-                    if (i > 0) {
-                        strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent items
-                    }
-                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "%d", int_list[i]);
-                }
-                strncat_s(json_payload, sizeof(json_payload), "]", _TRUNCATE); // Close the list
-                arg_count++;
-            }
-            else if (type == TYPE_LIST_STRING) {
-                const char* list_key = va_arg(args, const char*);
-                char** str_list = va_arg(args, char**); // Get the string list
-                int list_size = va_arg(args, int); // Get the size of the list
-
-                strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent pairs
-
-                snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\":[", list_key);
-
-                for (int i = 0; i < list_size; i++) {
-                    if (i > 0) {
-                        strncat_s(json_payload, sizeof(json_payload), ", ", _TRUNCATE); // Add a comma for subsequent items
-                    }
-                    snprintf(json_payload + strlen(json_payload), sizeof(json_payload) - strlen(json_payload), "\"%s\"", str_list[i]);
-                }
-                strncat_s(json_payload, sizeof(json_payload), "]", _TRUNCATE); // Close the list
-                arg_count++;
-            }
-        }
-
-        // Closing the JSON object
-        strncat_s(json_payload, sizeof(json_payload), "}", _TRUNCATE);
-
-        // Set the URL
-        curl_easy_setopt(curl, CURLOPT_URL, URL);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, json_payload);
-
-        // Set headers for JSON content
-        struct curl_slist* headers = NULL;
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-        // Perform the request
-        res = curl_easy_perform(curl);
-
-        // Check for errors
-        if (res != CURLE_OK) {
-            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
-        }
-
-        // Cleanup
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-    }
-}
-
 // Recursive function to try all possible ways to sort the integer
 int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* startExcl, GenericList* endExcl, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
     int placeInd;
@@ -473,7 +366,7 @@ int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeaves
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
-                call_JS_endpoint("better sorting", sheetCodeName,
+                call_vba_function_from_c("better sorting", sheetCodeName,
                     TYPE_LIST_INT, "myList1", nodIds, n,
                     -1);
             }
@@ -630,9 +523,189 @@ char* concatenate(const char* str1, const char* str2) {
     return result; // Return the concatenated string
 }
 
+int call_vba_function_from_c(const char* arg1, const char* arg2, ...) {
+    const char* file_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter/dance.xlsm";
+    const char* macro_name = "YourMacroName";
+    Py_Initialize();
+
+    // Add the directory of your Python module to sys.path
+    PyObject* sys_path = PySys_GetObject("path");
+    PyList_Append(sys_path, PyUnicode_FromString("C:/path/to/your/module"));
+
+    // Import the Python module
+    PyObject* pName = PyUnicode_DecodeFSDefault("callVBA");
+    PyObject* pModule = PyImport_Import(pName);
+    Py_DECREF(pName);
+
+    if (pModule != NULL) {
+        // Get the function from the module
+        PyObject* pFunc = PyObject_GetAttrString(pModule, "call_vba_function");
+
+        if (pFunc && PyCallable_Check(pFunc)) {
+            // Prepare arguments
+            PyObject* arg_list = PyList_New(0);
+            PyList_Append(arg_list, PyUnicode_FromString(file_path));
+            PyList_Append(arg_list, PyUnicode_FromString(macro_name));
+            PyList_Append(arg_list, PyUnicode_FromString(arg1));
+            PyList_Append(arg_list, PyUnicode_FromString(arg2));
+
+            // Process variable arguments
+            va_list args;
+            va_start(args, arg2);
+            int arg_type;
+            while ((arg_type = va_arg(args, int)) != TYPE_END) {
+                switch (arg_type) {
+                case TYPE_INT: {
+                    int value = va_arg(args, int);
+                    PyList_Append(arg_list, PyLong_FromLong(value));
+                    break;
+                }
+                case TYPE_STRING: {
+                    const char* str = va_arg(args, const char*);
+                    PyList_Append(arg_list, PyUnicode_FromString(str));
+                    break;
+                }
+                case TYPE_LIST_INT: {
+                    const char* name = va_arg(args, const char*);
+                    int* list = va_arg(args, int*);
+                    int n = va_arg(args, int);
+                    // Create a Python list from the array
+                    PyObject* py_list = PyList_New(n);
+                    for (int i = 0; i < n; ++i) {
+                        PyList_SetItem(py_list, i, PyLong_FromLong(list[i]));
+                    }
+                    // Add the name and the list to the arguments
+                    PyList_Append(arg_list, PyUnicode_FromString(name));
+                    PyList_Append(arg_list, py_list);
+                    Py_DECREF(py_list);
+                    break;
+                }
+                default: {
+                    fprintf(stderr, "Unknown argument type\n");
+                    va_end(args);
+                    return -1;
+                }
+                }
+            }
+            va_end(args);
+
+            // Convert list to tuple
+            PyObject* pArgs = PyList_AsTuple(arg_list);
+            Py_DECREF(arg_list);
+
+            // Call the function
+            PyObject* pValue = PyObject_CallObject(pFunc, pArgs);
+            Py_DECREF(pArgs);
+
+            // Handle the result
+            if (pValue != NULL) {
+                int result = (int)PyLong_AsLong(pValue);
+                Py_DECREF(pValue);
+                Py_DECREF(pFunc);
+                Py_DECREF(pModule);
+                Py_Finalize();
+                return result;
+            }
+            else {
+                Py_DECREF(pFunc);
+                Py_DECREF(pModule);
+                PyErr_Print();
+                fprintf(stderr, "Python function call failed\n");
+            }
+        }
+        else {
+            if (PyErr_Occurred()) PyErr_Print();
+            fprintf(stderr, "Cannot find function \"call_vba_function\"\n");
+        }
+        Py_XDECREF(pFunc);
+        Py_DECREF(pModule);
+    }
+    else {
+        PyErr_Print();
+        fprintf(stderr, "Failed to load \"callVBA\" module\n");
+    }
+
+    Py_Finalize();
+    return -1;
+}
+
+int call_vba_function_from_c2(const char* arg1, int arg2) {
+    const char* file_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter/dance.xlsm";
+    const char* macro_name = "YourMacroName";
+    Py_Initialize();
+
+    // Add the directory of excel_macro.py to sys.path
+    PyObject* sys_path = PySys_GetObject("path");
+    PyList_Append(sys_path, PyUnicode_FromString("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter"));
+
+    // Import the Python module
+    PyObject* pName = PyUnicode_DecodeFSDefault("callVBA");
+    PyObject* pModule = PyImport_Import(pName);
+    Py_DECREF(pName);
+
+    if (pModule != NULL) {
+        // Get the function from the module
+        PyObject* pFunc = PyObject_GetAttrString(pModule, "call_vba_function");
+
+        if (pFunc && PyCallable_Check(pFunc)) {
+            // Prepare arguments for the function
+            PyObject* pArgs = PyTuple_New(4);
+            PyTuple_SetItem(pArgs, 0, PyUnicode_FromString(file_path));
+            PyTuple_SetItem(pArgs, 1, PyUnicode_FromString(macro_name));
+            PyTuple_SetItem(pArgs, 2, PyUnicode_FromString(arg1));
+            PyTuple_SetItem(pArgs, 3, PyLong_FromLong(arg2));
+
+            // Call the function
+            PyObject* pValue = PyObject_CallObject(pFunc, pArgs);
+            Py_DECREF(pArgs);
+
+            if (pValue != NULL) {
+                // Convert the Python result to C int (assuming the result is an integer)
+                int result = (int)PyLong_AsLong(pValue);
+                Py_DECREF(pValue);
+                Py_DECREF(pFunc);
+                Py_DECREF(pModule);
+                Py_Finalize();
+                return result;
+            }
+            else {
+                Py_DECREF(pFunc);
+                Py_DECREF(pModule);
+                PyErr_Print();
+                fprintf(stderr, "Python function call failed\n");
+            }
+        }
+        else {
+            if (PyErr_Occurred()) PyErr_Print();
+            fprintf(stderr, "Cannot find function \"call_vba_function\"\n");
+        }
+        Py_XDECREF(pFunc);
+        Py_DECREF(pModule);
+    }
+    else {
+        PyErr_Print();
+        fprintf(stderr, "Failed to load \"excel_macro\" module\n");
+    }
+
+    Py_Finalize();
+    return -1;
+}
+
 int main(int argc, char* argv[]) {
 	// TODO : Check if sortings of similar systems already exist
 
+
+    call_vba_function_from_c("better sorting", 42,
+        TYPE_END);
+    return 0;
+    int nodIds[] = { 1, 2, 3, 4, 5 };
+    int n2 = sizeof(nodIds) / sizeof(nodIds[0]);
+    const char* sheetCodeName = "Sheet1";
+
+    call_vba_function_from_c("better sorting", sheetCodeName,
+        TYPE_LIST_INT, "myList1", nodIds, n2,
+        TYPE_END);
+	return 0;
 
     // Define the parameters
     int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
@@ -792,7 +865,7 @@ int main(int argc, char* argv[]) {
     free(result);
     freeNodes(nodes, n);
 
-    call_JS_endpoint("C stops sorting", argv[1],
+    call_vba_function_from_c("C stops sorting", argv[1],
         -1);
 
     return 0;
