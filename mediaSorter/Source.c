@@ -523,14 +523,13 @@ char* concatenate(const char* str1, const char* str2) {
     return result; // Return the concatenated string
 }
 
-int call_vba_function_from_c(const char* arg1, const char* arg2, ...) {
+int call_vba_function_from_c(const char* macro_name, const char* arg1, ...) {
     const char* file_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter/dance.xlsm";
-    const char* macro_name = "YourMacroName";
     Py_Initialize();
 
     // Add the directory of your Python module to sys.path
     PyObject* sys_path = PySys_GetObject("path");
-    PyList_Append(sys_path, PyUnicode_FromString("C:/path/to/your/module"));
+    PyList_Append(sys_path, PyUnicode_FromString("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter"));
 
     // Import the Python module
     PyObject* pName = PyUnicode_DecodeFSDefault("callVBA");
@@ -547,11 +546,10 @@ int call_vba_function_from_c(const char* arg1, const char* arg2, ...) {
             PyList_Append(arg_list, PyUnicode_FromString(file_path));
             PyList_Append(arg_list, PyUnicode_FromString(macro_name));
             PyList_Append(arg_list, PyUnicode_FromString(arg1));
-            PyList_Append(arg_list, PyUnicode_FromString(arg2));
 
             // Process variable arguments
             va_list args;
-            va_start(args, arg2);
+            va_start(args, arg1);
             int arg_type;
             while ((arg_type = va_arg(args, int)) != TYPE_END) {
                 switch (arg_type) {
@@ -695,14 +693,13 @@ int main(int argc, char* argv[]) {
 	// TODO : Check if sortings of similar systems already exist
 
 
-    call_vba_function_from_c("better sorting", 42,
-        TYPE_END);
-    return 0;
+    //call_vba_function_from_c("better sorting", "gyjdgyj",
+    //    TYPE_END);
+    ////return 0;
     int nodIds[] = { 1, 2, 3, 4, 5 };
     int n2 = sizeof(nodIds) / sizeof(nodIds[0]);
     const char* sheetCodeName = "Sheet1";
-
-    call_vba_function_from_c("better sorting", sheetCodeName,
+    call_vba_function_from_c("PrintStringAndList", sheetCodeName,
         TYPE_LIST_INT, "myList1", nodIds, n2,
         TYPE_END);
 	return 0;
