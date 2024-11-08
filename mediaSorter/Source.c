@@ -13,10 +13,9 @@
 #include <Python.h>
 
 
-#define TYPE_INT 1
-#define TYPE_STRING 2
-#define TYPE_LIST_INT 3
-#define TYPE_END -1
+#define TYPE_END 0
+#define TYPE_STRING 1
+#define TYPE_LIST_INT 2
 
 
 typedef struct {
@@ -269,6 +268,68 @@ void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests,
     }
 }
 
+// Function that takes two strings and a list of integers and calls a Python function
+void call_python_function(const char* str1, const char* str2, int* int_list, size_t list_size) {
+    // Initialize the Python interpreter
+    Py_Initialize();
+
+    // Add this before importing the module
+    PyRun_SimpleString("import sys");
+    PyRun_SimpleString("sys.path.append('C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter')");  // Update this path
+
+    // Prepare the arguments for the Python function
+    PyObject* pName, * pModule, * pFunc, * pArgs, * pList;
+
+    // Convert C strings to Python strings
+    PyObject* pyStr1 = PyUnicode_FromString(str1);
+    PyObject* pyStr2 = PyUnicode_FromString(str2);
+
+    // Create a Python list for the integers
+    pList = PyList_New(list_size);
+    for (size_t i = 0; i < list_size; ++i) {
+        PyObject* pyInt = PyLong_FromLong(int_list[i]);
+        PyList_SetItem(pList, i, pyInt);  // Note: PyList_SetItem steals reference
+    }
+
+    // Load the Python module
+    pName = PyUnicode_FromString("callVBA");  // Replace with your module name
+    pModule = PyImport_Import(pName);
+    Py_DECREF(pName);
+
+    if (pModule != NULL) {
+        // Get the reference to the Python function
+        pFunc = PyObject_GetAttrString(pModule, "call_vba_function");  // Replace with your function name
+
+        if (pFunc && PyCallable_Check(pFunc)) {
+            // Create a tuple to hold the arguments
+            pArgs = PyTuple_Pack(3, pyStr1, pyStr2, pList);
+            // Call the Python function without caring for the return value
+            PyObject_CallObject(pFunc, pArgs);
+            Py_DECREF(pArgs);
+        }
+        else {
+            if (PyErr_Occurred())
+                PyErr_Print();
+            fprintf(stderr, "Cannot find function \"%s\"\n", "call_vba_function");
+        }
+
+        Py_XDECREF(pFunc);
+        Py_DECREF(pModule);
+    }
+    else {
+        PyErr_Print();
+        fprintf(stderr, "Failed to load \"%s\"\n", "callVBA");
+    }
+
+    // Clean up
+    Py_DECREF(pyStr1);
+    Py_DECREF(pyStr2);
+    Py_DECREF(pList);
+
+    // Finalize the Python interpreter
+    Py_Finalize();
+}
+
 // Recursive function to try all possible ways to sort the integer
 int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* startExcl, GenericList* endExcl, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
     int placeInd;
@@ -366,9 +427,7 @@ int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeaves
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
-                call_vba_function_from_c("better sorting", sheetCodeName,
-                    TYPE_LIST_INT, "myList1", nodIds, n,
-                    -1);
+                call_python_function("better sorting", sheetCodeName, nodIds, n);
             }
             if (depth == endI) {
                 if (mpiManagement == 0) {
@@ -523,185 +582,50 @@ char* concatenate(const char* str1, const char* str2) {
     return result; // Return the concatenated string
 }
 
-int call_vba_function_from_c(const char* macro_name, const char* arg1, ...) {
-    const char* file_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter/dance.xlsm";
-    Py_Initialize();
-
-    // Add the directory of your Python module to sys.path
-    PyObject* sys_path = PySys_GetObject("path");
-    PyList_Append(sys_path, PyUnicode_FromString("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter"));
-
-    // Import the Python module
-    PyObject* pName = PyUnicode_DecodeFSDefault("callVBA");
-    PyObject* pModule = PyImport_Import(pName);
-    Py_DECREF(pName);
-
-    if (pModule != NULL) {
-        // Get the function from the module
-        PyObject* pFunc = PyObject_GetAttrString(pModule, "call_vba_function");
-
-        if (pFunc && PyCallable_Check(pFunc)) {
-            // Prepare arguments
-            PyObject* arg_list = PyList_New(0);
-            PyList_Append(arg_list, PyUnicode_FromString(file_path));
-            PyList_Append(arg_list, PyUnicode_FromString(macro_name));
-            PyList_Append(arg_list, PyUnicode_FromString(arg1));
-
-            // Process variable arguments
-            va_list args;
-            va_start(args, arg1);
-            int arg_type;
-            while ((arg_type = va_arg(args, int)) != TYPE_END) {
-                switch (arg_type) {
-                case TYPE_INT: {
-                    int value = va_arg(args, int);
-                    PyList_Append(arg_list, PyLong_FromLong(value));
-                    break;
-                }
-                case TYPE_STRING: {
-                    const char* str = va_arg(args, const char*);
-                    PyList_Append(arg_list, PyUnicode_FromString(str));
-                    break;
-                }
-                case TYPE_LIST_INT: {
-                    const char* name = va_arg(args, const char*);
-                    int* list = va_arg(args, int*);
-                    int n = va_arg(args, int);
-                    // Create a Python list from the array
-                    PyObject* py_list = PyList_New(n);
-                    for (int i = 0; i < n; ++i) {
-                        PyList_SetItem(py_list, i, PyLong_FromLong(list[i]));
-                    }
-                    // Add the name and the list to the arguments
-                    PyList_Append(arg_list, PyUnicode_FromString(name));
-                    PyList_Append(arg_list, py_list);
-                    Py_DECREF(py_list);
-                    break;
-                }
-                default: {
-                    fprintf(stderr, "Unknown argument type\n");
-                    va_end(args);
-                    return -1;
-                }
-                }
-            }
-            va_end(args);
-
-            // Convert list to tuple
-            PyObject* pArgs = PyList_AsTuple(arg_list);
-            Py_DECREF(arg_list);
-
-            // Call the function
-            PyObject* pValue = PyObject_CallObject(pFunc, pArgs);
-            Py_DECREF(pArgs);
-
-            // Handle the result
-            if (pValue != NULL) {
-                int result = (int)PyLong_AsLong(pValue);
-                Py_DECREF(pValue);
-                Py_DECREF(pFunc);
-                Py_DECREF(pModule);
-                Py_Finalize();
-                return result;
-            }
-            else {
-                Py_DECREF(pFunc);
-                Py_DECREF(pModule);
-                PyErr_Print();
-                fprintf(stderr, "Python function call failed\n");
-            }
-        }
-        else {
-            if (PyErr_Occurred()) PyErr_Print();
-            fprintf(stderr, "Cannot find function \"call_vba_function\"\n");
-        }
-        Py_XDECREF(pFunc);
-        Py_DECREF(pModule);
-    }
-    else {
+void add_to_python_path(const char* path) {
+    // Import the sys module
+    PyObject* pSys = PyImport_ImportModule("sys");
+    if (!pSys) {
         PyErr_Print();
-        fprintf(stderr, "Failed to load \"callVBA\" module\n");
+        fprintf(stderr, "Failed to import sys\n");
+        return;
     }
 
-    Py_Finalize();
-    return -1;
-}
-
-int call_vba_function_from_c2(const char* arg1, int arg2) {
-    const char* file_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter/dance.xlsm";
-    const char* macro_name = "YourMacroName";
-    Py_Initialize();
-
-    // Add the directory of excel_macro.py to sys.path
-    PyObject* sys_path = PySys_GetObject("path");
-    PyList_Append(sys_path, PyUnicode_FromString("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter"));
-
-    // Import the Python module
-    PyObject* pName = PyUnicode_DecodeFSDefault("callVBA");
-    PyObject* pModule = PyImport_Import(pName);
-    Py_DECREF(pName);
-
-    if (pModule != NULL) {
-        // Get the function from the module
-        PyObject* pFunc = PyObject_GetAttrString(pModule, "call_vba_function");
-
-        if (pFunc && PyCallable_Check(pFunc)) {
-            // Prepare arguments for the function
-            PyObject* pArgs = PyTuple_New(4);
-            PyTuple_SetItem(pArgs, 0, PyUnicode_FromString(file_path));
-            PyTuple_SetItem(pArgs, 1, PyUnicode_FromString(macro_name));
-            PyTuple_SetItem(pArgs, 2, PyUnicode_FromString(arg1));
-            PyTuple_SetItem(pArgs, 3, PyLong_FromLong(arg2));
-
-            // Call the function
-            PyObject* pValue = PyObject_CallObject(pFunc, pArgs);
-            Py_DECREF(pArgs);
-
-            if (pValue != NULL) {
-                // Convert the Python result to C int (assuming the result is an integer)
-                int result = (int)PyLong_AsLong(pValue);
-                Py_DECREF(pValue);
-                Py_DECREF(pFunc);
-                Py_DECREF(pModule);
-                Py_Finalize();
-                return result;
-            }
-            else {
-                Py_DECREF(pFunc);
-                Py_DECREF(pModule);
-                PyErr_Print();
-                fprintf(stderr, "Python function call failed\n");
-            }
-        }
-        else {
-            if (PyErr_Occurred()) PyErr_Print();
-            fprintf(stderr, "Cannot find function \"call_vba_function\"\n");
-        }
-        Py_XDECREF(pFunc);
-        Py_DECREF(pModule);
-    }
-    else {
+    // Get the path list from sys.path
+    PyObject* pPath = PyObject_GetAttrString(pSys, "path");
+    if (!pPath) {
         PyErr_Print();
-        fprintf(stderr, "Failed to load \"excel_macro\" module\n");
+        fprintf(stderr, "Failed to get sys.path\n");
+        Py_DECREF(pSys);
+        return;
     }
 
-    Py_Finalize();
-    return -1;
+    // Create a new Python string for the path to add
+    PyObject* pPathStr = PyUnicode_FromString(path);
+    if (!pPathStr) {
+        PyErr_Print();
+        fprintf(stderr, "Failed to create Python string for path\n");
+        Py_DECREF(pPath);
+        Py_DECREF(pSys);
+        return;
+    }
+
+    // Append the path to sys.path
+    PyList_Append(pPath, pPathStr);
+
+    // Clean up references
+    Py_DECREF(pPathStr);
+    Py_DECREF(pPath);
+    Py_DECREF(pSys);
 }
 
 int main(int argc, char* argv[]) {
 	// TODO : Check if sortings of similar systems already exist
 
-
-    //call_vba_function_from_c("better sorting", "gyjdgyj",
-    //    TYPE_END);
-    ////return 0;
-    int nodIds[] = { 1, 2, 3, 4, 5 };
+    int nodIds[] = { 2, 4, 3, 5 };
     int n2 = sizeof(nodIds) / sizeof(nodIds[0]);
-    const char* sheetCodeName = "Sheet1";
-    call_vba_function_from_c("PrintStringAndList", sheetCodeName,
-        TYPE_LIST_INT, "myList1", nodIds, n2,
-        TYPE_END);
+    const char* sheetCodeName = "Feuil3";
+    call_python_function("PrintStringAndList", sheetCodeName, nodIds, n2);
 	return 0;
 
     // Define the parameters
@@ -862,8 +786,7 @@ int main(int argc, char* argv[]) {
     free(result);
     freeNodes(nodes, n);
 
-    call_vba_function_from_c("C stops sorting", argv[1],
-        -1);
+    call_python_function("C stops sorting", argv[1], NULL, 0);
 
     return 0;
 }
