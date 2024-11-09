@@ -427,7 +427,7 @@ int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeaves
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
-                call_python_function("better sorting", sheetCodeName, nodIds, n);
+                call_python_function("SwapRows", sheetCodeName, nodIds, n);
             }
             if (depth == endI) {
                 if (mpiManagement == 0) {
@@ -622,12 +622,6 @@ void add_to_python_path(const char* path) {
 int main(int argc, char* argv[]) {
 	// TODO : Check if sortings of similar systems already exist
 
-    int nodIds[] = { 2, 4, 3, 5 };
-    int n2 = sizeof(nodIds) / sizeof(nodIds[0]);
-    const char* sheetCodeName = "Feuil3";
-    call_python_function("PrintStringAndList", sheetCodeName, nodIds, n2);
-	return 0;
-
     // Define the parameters
     int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
     int nbLeavesMin = 100; // Define the minimum time to sort
@@ -786,7 +780,7 @@ int main(int argc, char* argv[]) {
     free(result);
     freeNodes(nodes, n);
 
-    call_python_function("C stops sorting", argv[1], NULL, 0);
+    call_python_function("switchSort", argv[1], NULL, 0);
 
     return 0;
 }
