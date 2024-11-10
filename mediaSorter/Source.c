@@ -12,6 +12,8 @@
 
 #include <Python.h>
 
+#include <windows.h>
+
 
 #define TYPE_END 0
 #define TYPE_STRING 1
@@ -185,6 +187,50 @@ void parseJSONToNode(Node** nodes, int* n, const char* filename) {
     cJSON_Delete(json);
 }
 
+void write_to_file(const char* filename, const char* message) {
+    // Open file for writing
+    HANDLE file = CreateFile(filename, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "Error opening file\n");
+        return;
+    }
+
+    // Lock the file for exclusive access
+    OVERLAPPED overlap = { 0 };
+    if (!LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlap)) {
+        fprintf(stderr, "Error locking file\n");
+        CloseHandle(file);
+        return;
+    }
+
+    // Move the file pointer to the end for appending
+    SetFilePointer(file, 0, NULL, FILE_END);
+
+    // Write the message to the file
+    DWORD written;
+    WriteFile(file, message, strlen(message), &written, NULL);
+    WriteFile(file, "\n", 1, &written, NULL); // Add newline
+
+    // Unlock and close the file
+    UnlockFileEx(file, 0, MAXDWORD, MAXDWORD, &overlap);
+    CloseHandle(file);
+}
+
+void trigger_python_script(const char* script_path, const char* arg) {
+    // Construct the command to run the Python script with the argument
+    char command[512];  // Adjust buffer size if needed
+    snprintf(command, sizeof(command), "python3 %s %s", script_path, arg);
+
+    // Use the system() function to execute the command
+    int status = system(command);
+    if (status == -1) {
+        perror("Error executing Python script");
+    }
+    else {
+        printf("Python script triggered successfully with argument: %s\n", arg);
+    }
+}
+
 void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
     if (nodes[i].highest != -1) {
         int highest = nodes[i].highest;
@@ -266,68 +312,6 @@ void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests,
             k--;
         }
     }
-}
-
-// Function that takes two strings and a list of integers and calls a Python function
-void call_python_function(const char* str1, const char* str2, int* int_list, size_t list_size) {
-    // Initialize the Python interpreter
-    Py_Initialize();
-
-    // Add this before importing the module
-    PyRun_SimpleString("import sys");
-    PyRun_SimpleString("sys.path.append('C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/excel_prog/mediaSorter')");  // Update this path
-
-    // Prepare the arguments for the Python function
-    PyObject* pName, * pModule, * pFunc, * pArgs, * pList;
-
-    // Convert C strings to Python strings
-    PyObject* pyStr1 = PyUnicode_FromString(str1);
-    PyObject* pyStr2 = PyUnicode_FromString(str2);
-
-    // Create a Python list for the integers
-    pList = PyList_New(list_size);
-    for (size_t i = 0; i < list_size; ++i) {
-        PyObject* pyInt = PyLong_FromLong(int_list[i]);
-        PyList_SetItem(pList, i, pyInt);  // Note: PyList_SetItem steals reference
-    }
-
-    // Load the Python module
-    pName = PyUnicode_FromString("callVBA");  // Replace with your module name
-    pModule = PyImport_Import(pName);
-    Py_DECREF(pName);
-
-    if (pModule != NULL) {
-        // Get the reference to the Python function
-        pFunc = PyObject_GetAttrString(pModule, "call_vba_function");  // Replace with your function name
-
-        if (pFunc && PyCallable_Check(pFunc)) {
-            // Create a tuple to hold the arguments
-            pArgs = PyTuple_Pack(3, pyStr1, pyStr2, pList);
-            // Call the Python function without caring for the return value
-            PyObject_CallObject(pFunc, pArgs);
-            Py_DECREF(pArgs);
-        }
-        else {
-            if (PyErr_Occurred())
-                PyErr_Print();
-            fprintf(stderr, "Cannot find function \"%s\"\n", "call_vba_function");
-        }
-
-        Py_XDECREF(pFunc);
-        Py_DECREF(pModule);
-    }
-    else {
-        PyErr_Print();
-        fprintf(stderr, "Failed to load \"%s\"\n", "callVBA");
-    }
-
-    // Clean up
-    Py_DECREF(pyStr1);
-    Py_DECREF(pyStr2);
-    Py_DECREF(pList);
-
-    // Finalize the Python interpreter
-    Py_Finalize();
 }
 
 // Recursive function to try all possible ways to sort the integer
@@ -427,6 +411,7 @@ int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeaves
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
+				write_to_file("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/overwatch_order.txt", "overwatch_order.txt");
                 call_python_function("SwapRows", sheetCodeName, nodIds, n);
             }
             if (depth == endI) {
@@ -580,43 +565,6 @@ char* concatenate(const char* str1, const char* str2) {
     strcat_s(result, total_length, str2);
 
     return result; // Return the concatenated string
-}
-
-void add_to_python_path(const char* path) {
-    // Import the sys module
-    PyObject* pSys = PyImport_ImportModule("sys");
-    if (!pSys) {
-        PyErr_Print();
-        fprintf(stderr, "Failed to import sys\n");
-        return;
-    }
-
-    // Get the path list from sys.path
-    PyObject* pPath = PyObject_GetAttrString(pSys, "path");
-    if (!pPath) {
-        PyErr_Print();
-        fprintf(stderr, "Failed to get sys.path\n");
-        Py_DECREF(pSys);
-        return;
-    }
-
-    // Create a new Python string for the path to add
-    PyObject* pPathStr = PyUnicode_FromString(path);
-    if (!pPathStr) {
-        PyErr_Print();
-        fprintf(stderr, "Failed to create Python string for path\n");
-        Py_DECREF(pPath);
-        Py_DECREF(pSys);
-        return;
-    }
-
-    // Append the path to sys.path
-    PyList_Append(pPath, pPathStr);
-
-    // Clean up references
-    Py_DECREF(pPathStr);
-    Py_DECREF(pPath);
-    Py_DECREF(pSys);
 }
 
 int main(int argc, char* argv[]) {
