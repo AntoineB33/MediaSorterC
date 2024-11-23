@@ -58,10 +58,12 @@ typedef struct {
     int* const nextLeafToUse;
 	int startDepthThrd;
 	int currentLeaf;
-	int errorThrd;
     int* const error;
+	int errorThrd;
     int* const nbAwaitingThrd;
 	int* const awaitingThrds;
+	GenericList* const startExcl;
+    GenericList* const endExcl;
     int* const reservationListsResult;
 	int* const reservationListsElemResult;
 	int* const result;
@@ -299,8 +301,7 @@ void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRul
     }
 }
 
-void chosenUlt(Node* nodes, int rank, int depth, int*** rests, int** restsSizes, int i) {
-    nodes[i].nbPost--;
+void chosenUlt(Node* nodes, int rank, int depth, int*** rests, int i) {
     if (nodes[i].nbPost == 0) {
         rests[rank][depth][restsSizes[rank][depth]] = i;
         restsSizes[rank][depth]++;
@@ -317,11 +318,12 @@ int all_sorted(int* sorted, int n) {
     return 1;
 }
 
-int check_conditions(Node* nodes, int* result, int n, int i) {
-	//for (int condInd = 0; condInd < nodes[i].conditions_size; condInd++) {
-	//	// Check if the condition is satisfied
-	//}
-	return 1;
+int check_conditions(Node* nodes, int n, int* resultNodes, int depth, int nodeId) {
+	int is_true = 1;
+	for (int condInd = 0; condInd < nodes[nodeId].conditions_size; condInd++) {
+        is_true = 0;
+	}
+	return is_true;
 }
 
 void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests, int** restsSizes) {
@@ -481,8 +483,11 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	int startDepthThrd = params->startDepthThrd;
 	int currentLeaf = params->currentLeaf;
 	int* const error = params->error;
+    int errorThrd = params->errorThrd;
 	int* const nbAwaitingThrd = params->nbAwaitingThrd;
 	int* const awaitingThrds = params->awaitingThrds;
+    GenericList* const startExcl = params->startExcl;
+    GenericList* const endExcl = params->endExcl;
 	int* const reservationListsResult = params->reservationListsResult;
 	int* const reservationListsElemResult = params->reservationListsElemResult;
 	int* const result = params->result;
@@ -493,15 +498,13 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	int ascending = 0;
     int found = 0;
     int currentElement;
-	int befUpdErr = nbItBefUpdErr;
+	int befUpdErr = 1;
     int startInd = 0;
     int depth = 0;
     int nodId;
-	int* resultCurrentThrd = NULL;
-    int errorThrd;
+	int* resultNodes = malloc(n * sizeof(int));
 	int* const busyNodes = malloc(n * sizeof(int));
-	int* const restsSizes = malloc(n * sizeof(int));
-	int** const rests = malloc(n * sizeof(int*));
+	GenericList* const rests = malloc(n * sizeof(GenericList));
     ReservationRule* const reservationRules = malloc((n + 1) * sizeof(ReservationRule));
     ReservationList* const reservationLists = malloc((n - 1) * sizeof(ReservationList));
     int* const parkingErrors = malloc(n * sizeof(int));
@@ -512,14 +515,12 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	lonerErrors[0] = 0;
     for (int i = 0; i < n + 1; i++) {
         busyNodes[i] = nodes[i].nbPost;
-        restsSizes[i] = 0;
-        rests[i] = malloc((n - i) * sizeof(int));
+        initList(&rests[i], sizeof(int), 1);
         reservationRules[i].resList = -1;
     }
     for (int i = 0; i < n; i++) {
-        if (check_conditions()) {
-            rests[0][restsSizes[0]] = i;
-            restsSizes[0]++;
+        if (busyNodes[i] == 0 && check_conditions(nodes, n, resultNodes, 0, i)) {
+			addElement(&(rests[0]), &i);
         }
     }
     for (int i = 0; i < n - 1; i++) {
@@ -536,7 +537,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 int* nodIds = malloc(n * sizeof(int));
                 for (int i = 0; i < n; i++) {
                     if (reservationListsResult[i] == -1) {
-                        nodId = rests[i][result[i]];
+                        nodId = ((int*)rests[i].data)[result[i]];
                     }
                     else {
                         nodId = ((int*)reservationLists[reservationListsResult[i]].data.data)[reservationListsElemResult[i]];
@@ -564,23 +565,21 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
             if (ascending == 1) {
                 // ********* update the remaining elements *********
 
-                restsSizes[depth] = restsSizes[depth - 1] - 1;
-
                 // copy the remaining indexes before the chosen one
                 for (int i = 0; i < result[depth - 1]; i++) {
-                    rests[depth][i] = rests[depth - 1][i];
+                    addElement(&(rests[depth]), &((int*)rests[depth - 1].data)[i]);
                 }
 
                 // copy the remaining indexes after the chosen one
-                for (int i = result[depth - 1] + 1; i < restsSizes[depth - 1]; i++) {
-                    rests[depth][i - 1] = rests[depth - 1][i];
+                for (int i = result[depth - 1]; i < rests[depth - 1].size - 1; i++) {
+					addElement(&(rests[depth]), &((int*)rests[depth - 1].data)[i + 1]);
                 }
 
 
 
                 // ********* consequences of the choice in previous depth *********
 
-                nodId = rests[depth - 1][result[depth - 1]];
+                nodId = ((int*)rests[depth - 1].data)[result[depth - 1]];
                 busyNodes[nodId]++;
 
                 // update the reservation rules
@@ -618,7 +617,8 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                     removeElement(&(reservationLists[highest].data), nodId);
                 }
                 for (int j = 0; j < nodes[nodId].ulteriors.size; j++) {
-                    chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)nodes[nodId].ulteriors.data)[j]);
+					busyNodes[((int*)nodes[nodId].ulteriors.data)[j]]--;
+                    chosenUlt(nodes, rank, depth, rests, ((int*)nodes[nodId].ulteriors.data)[j]);
                 }
 
                 // nodes that can't be chosen there but could before
@@ -629,6 +629,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 
                 // nodes that can be chosen there but couldn't before
                 for (int i = 0; i < endExcl[depth].size; i++) {
+					busyNodes[((int*)startExcl[depth].data)[i]]--;
                     chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)startExcl[depth].data)[i]);
                 }
 
@@ -736,7 +737,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 }
                 result[rank][depth]--;
                 currentElement = rests[rank][depth][result[rank][depth]];
-                if (check_conditions(nodes, result[rank], n, currentElement) == 1) {
+                if (check_conditions(nodes, n, resultNodes, depth) == 1) {
                     break;
                 }
             } while (1);
@@ -755,7 +756,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
             do {
                 for (int i = choiceInd; i < reservationLists[rank][placeInd].data.size; i++) {
                     currentElement = ((int*)reservationLists[rank][placeInd].data.data)[i];
-                    if (nodes[currentElement].nbPost == 0 && check_conditions(nodes, result[rank], n, currentElement) == 1) {
+                    if (nodes[currentElement].nbPost == 0 && check_conditions(nodes, n, resultNodes, depth) == 1) {
                         reservationListsResult[rank][depth] = placeInd;
                         reservationListsElemResult[rank][depth] = i;
                         for (int j = 0; j < restsSizes[rank][depth]; j++) {
@@ -935,6 +936,12 @@ int main(int argc, char* argv[]) {
 	int* nextLeafToUse = malloc(n * sizeof(int));
 	int nbAwaitingThrd = 0;
 	int* awaitingThrds = malloc(nb_process * sizeof(int));
+    GenericList* startExclThrd = malloc(nb_process * sizeof(GenericList));
+    GenericList* endExclThrd = malloc(nb_process * sizeof(GenericList));
+    for (int i = 0; i < nb_process; i++) {
+		initList(&(startExclThrd[i]), sizeof(int), 1);
+		initList(&(endExclThrd[i]), sizeof(int), 1);
+    }
 	int* reservationListsResult = malloc(n * sizeof(int));
 	int* reservationListsElemResult = malloc(n * sizeof(int));
 	int* result = malloc(n * sizeof(int));
@@ -949,10 +956,12 @@ int main(int argc, char* argv[]) {
 		.nextLeafToUse = nextLeafToUse,
 		.startDepthThrd = 0,
 		.currentLeaf = 0,
-		.errorThrd = &error,
-		.error = error,
+		.error = &error,
+		.errorThrd = error,
 		.nbAwaitingThrd = &nbAwaitingThrd,
 		.awaitingThrds = awaitingThrds,
+		.startExcl = startExcl,
+		.endExcl = endExcl,
 		.reservationListsResult = reservationListsResult,
 		.reservationListsElemResult = reservationListsElemResult,
 		.result = result,
