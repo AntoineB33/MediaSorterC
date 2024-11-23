@@ -4,20 +4,16 @@
 #include "cJSON.h"  // Include the cJSON header
 #include <curl/curl.h>
 #include <stdarg.h>
-
-//#include <windows.h>
 //#include <oleauto.h>
 //#include <comutil.h>
 ////#include <time.h>
-
 #include <Python.h>
-
 #include <windows.h>
+#include <stdbool.h>
+#include <limits.h>
 
 
-#define TYPE_END 0
-#define TYPE_STRING 1
-#define TYPE_LIST_INT 2
+#define LOCK_FILE_PATH "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.lock" // Lock file path
 
 
 typedef struct {
@@ -32,25 +28,56 @@ typedef struct {
 	GenericList ulteriors;	 // List of integers that must come after
 	char** conditions;	   // List of conditions that must be satisfied
 	int conditions_size;   // Number of conditions
-    int nbPost;         // Count of integers that must be placed before this
+	int nbPost;            // Number of nodes that must come before
     int highest;        // Highest placement allowed for this integer
 } Node;
 
 typedef struct {
-    int all;
+	int all;            // 1 if at this depth any one can be chosen in the consecutive resLists, 0 otherwise
     int resList;
 } ReservationRule;
 
 typedef struct {
-    GenericList data;
-    int out;
+	GenericList data;	// List of the nodes that are in the reservation list
+	int out;            // index of the first element that is not in the list
     int prevListInd;
     int nextListInd;
-} ReservationList;
+} ReservationList;      // List of the nodes that need to be placed at a certain depth
 
 typedef struct {
     int lastOcc;
 } AttributeMng;
+
+typedef struct {
+	HANDLE* eventHandlesThd;
+	HANDLE* semaphore;
+    const char* sheetPath;
+	const Node* const nodes;
+	const int n;
+	const int rank;
+    int* const nextLeafToUse;
+	int startDepthThrd;
+	int currentLeaf;
+	int errorThrd;
+    int* const error;
+    int* const nbAwaitingThrd;
+	int* const awaitingThrds;
+    int* const reservationListsResult;
+	int* const reservationListsElemResult;
+	int* const result;
+    int restoreUpTo;
+} ThreadParams;
+
+// Define the structure of an element
+typedef struct {
+    char stringField[256];
+    int intField;
+    int* listOfInts;
+    int listOfIntsSize;
+    int** listOfListOfInts;
+    int listOfListOfIntsSize;
+    int* listSizes; // Stores sizes of each sub-list in listOfListOfInts
+} Element;
 
 
 // Function to initialize the list
@@ -314,133 +341,344 @@ void removeFromRest(Node* nodes, int rank, int depth, int element, int*** rests,
     }
 }
 
+// Function to check if the file is locked
+int isFileLocked() {
+    FILE* lockFile = fopen(LOCK_FILE_PATH, "r");
+    if (lockFile) {
+        fclose(lockFile);
+        return 1; // File is locked
+    }
+    return 0; // File is not locked
+}
+
+// Function to acquire the lock
+void acquireLock() {
+    if (isFileLocked()) {
+        fprintf(stderr, "File is locked by another process.\n");
+        exit(1);
+    }
+    FILE* lockFile = fopen(LOCK_FILE_PATH, "w");
+    if (lockFile) {
+        fprintf(lockFile, "LOCK");
+        fclose(lockFile);
+    }
+}
+
+// Function to release the lock
+void releaseLock() {
+    remove(LOCK_FILE_PATH);
+}
+
+// Function to search and modify the content in the file
+void modifyFile(const char* const sheetPath, int* const error, int* const result, ReservationList* const reservationLists, int* const reservationListsResult, int* const reservationListsElemResult, int* const resultNodes) {
+    const char* filePath = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/sort_info.txt";
+
+    // Open the file in read mode
+    FILE* file = fopen(filePath, "r");
+    if (!file) {
+        perror("Failed to open file");
+        return;
+    }
+
+    // Get the file size and read the content
+    fseek(file, 0, SEEK_END);
+    long fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    char* content = malloc(fileSize + 1);
+    if (!content) {
+        perror("Failed to allocate memory");
+        fclose(file);
+        return;
+    }
+    fread(content, 1, fileSize, file);
+    content[fileSize] = '\0';  // Null-terminate the content
+    fclose(file);
+
+    // Parse the JSON data
+    cJSON* json = cJSON_Parse(content);
+    if (json == NULL) {
+        fprintf(stderr, "Error parsing JSON: %s\n", cJSON_GetErrorPtr());
+        free(content);
+        return;
+    }
+
+    cJSON* boolean1 = cJSON_GetObjectItem(json, "complexList");
+	if (boolean1 && cJSON_IsBool(boolean1)) {
+        if (cJSON_IsTrue(boolean1)) {
+			*error = 1;
+        }
+    }
+    else {
+		perror("boolean1 not found.\n");
+        return;
+    }
+
+    // Get the "complexList" array
+    cJSON* complexList = cJSON_GetObjectItem(json, "complexList");
+    if (complexList && cJSON_IsArray(complexList)) {
+        // Iterate through each item in the "complexList"
+        cJSON* item = NULL;
+        cJSON_ArrayForEach(item, complexList) {
+            cJSON* str = cJSON_GetObjectItem(item, "str");
+            if (str && cJSON_IsString(str) && strcmp(str->valuestring, "example4") == 0) {
+                // Modify the listOfIntLists for this element
+                cJSON* listOfIntLists = cJSON_GetObjectItem(item, "listOfIntLists");
+                if (listOfIntLists && cJSON_IsArray(listOfIntLists)) {
+                    // Modify the first sublist in listOfIntLists as an example
+                    cJSON* firstSublist = cJSON_GetArrayItem(listOfIntLists, 0);
+                    if (firstSublist && cJSON_IsArray(firstSublist)) {
+                        cJSON* newValue = cJSON_CreateNumber(999);  // Modify a value (example)
+                        cJSON_AddItemToArray(firstSublist, newValue);
+                    }
+                }
+            }
+        }
+    }
+    else {
+        printf("complexList not found or is not an array.\n");
+    }
+
+    // Convert the modified JSON back to a string
+    char* modifiedContent = cJSON_Print(json);
+    if (!modifiedContent) {
+        fprintf(stderr, "Error printing JSON\n");
+        cJSON_Delete(json);
+        free(content);
+        return;
+    }
+
+    // Write the modified content back to the file
+    file = fopen(filePath, "w");
+    if (!file) {
+        perror("Failed to open file for writing");
+        cJSON_Delete(json);
+        free(content);
+        free(modifiedContent);
+        return;
+    }
+    fputs(modifiedContent, file);
+    fclose(file);
+
+    // Cleanup
+    cJSON_Delete(json);
+    free(content);
+    free(modifiedContent);
+}
+
 // Recursive function to try all possible ways to sort the integer
-int try_sort(char* sheetCodeName,int nb_process, int nbItBefUpdErr, int nbLeavesMin, int nbLeavesMax, float repartTol, Node* nodes, GenericList* startExcl, GenericList* endExcl, int** result, int* errors, int** reservationListsResult, int** reservationListsElemResult, int*** rests, int** restsSizes, ReservationRule** reservationRules, ReservationList** reservationLists, int n, int reste, int* error, int mpiManagement, int* end, int rank, int* startsSize) {
+DWORD WINAPI threadSort(LPVOID lpParam) {
+    const int nbItBefUpdErr = 10000;
+
+    // Cast lpParam to the appropriate structure type
+    ThreadParams* params = (ThreadParams*)lpParam;
+	HANDLE* eventHandlesThd = params->eventHandlesThd;
+	HANDLE semaphore = *params->semaphore;
+	const char* const sheetPath = params->sheetPath;
+	const Node* const nodes = params->nodes;
+	const int n = params->n;
+	const int rank = params->rank;
+	int* const nextLeafToUse = params->nextLeafToUse;
+	int startDepthThrd = params->startDepthThrd;
+	int currentLeaf = params->currentLeaf;
+	int* const error = params->error;
+	int* const nbAwaitingThrd = params->nbAwaitingThrd;
+	int* const awaitingThrds = params->awaitingThrds;
+	int* const reservationListsResult = params->reservationListsResult;
+	int* const reservationListsElemResult = params->reservationListsElemResult;
+	int* const result = params->result;
+	int restoreUpTo = params->restoreUpTo;
+
     int placeInd;
     int choiceInd;
 	int ascending = 0;
     int found = 0;
     int currentElement;
 	int befUpdErr = nbItBefUpdErr;
-	int errorCopy = *error;
-    int nbLeaves = 0;
-	int startStarts = *startsSize * rank / nb_process + min(reste, rank);
-    int endStarts = *startsSize * (rank + 1) / nb_process + min(reste, rank + 1);
     int startInd = 0;
     int depth = 0;
-    int endI = *end;
-    int restLeaves = nb_process;
     int nodId;
+	int* resultCurrentThrd = NULL;
+    int errorThrd;
+	int* const busyNodes = malloc(n * sizeof(int));
+	int* const restsSizes = malloc(n * sizeof(int));
+	int** const rests = malloc(n * sizeof(int*));
+    ReservationRule* const reservationRules = malloc((n + 1) * sizeof(ReservationRule));
+    ReservationList* const reservationLists = malloc((n - 1) * sizeof(ReservationList));
+    int* const parkingErrors = malloc(n * sizeof(int));
+    int* const errors = malloc(n * sizeof(int));
+    int* const lonerErrors = malloc(n * sizeof(int));
+	parkingErrors[0] = 0;
+	errors[0] = 0;
+	lonerErrors[0] = 0;
+    for (int i = 0; i < n + 1; i++) {
+        busyNodes[i] = nodes[i].nbPost;
+        restsSizes[i] = 0;
+        rests[i] = malloc((n - i) * sizeof(int));
+        reservationRules[i].resList = -1;
+    }
+    for (int i = 0; i < n; i++) {
+        if (check_conditions()) {
+            rests[0][restsSizes[0]] = i;
+            restsSizes[0]++;
+        }
+    }
+    for (int i = 0; i < n - 1; i++) {
+        initList(&(reservationLists[i].data), sizeof(int), 1);
+        notChosenAnymore(nodes, n, i, reservationRules, reservationLists);
+    }
     while (1) {
         if (ascending == 1) {
-            depth++;
-            restsSizes[rank][depth] = restsSizes[rank][depth - 1] - 1;
-            for (int i = 0; i < result[rank][depth - 1]; i++) {
-                rests[rank][depth][i] = rests[rank][depth - 1][i];
-            }
-            for (int i = result[rank][depth - 1] + 1; i < restsSizes[rank][depth - 1]; i++) {
-                rests[rank][depth][i - 1] = rests[rank][depth - 1][i];
-            }
-            nodId = rests[rank][depth - 1][result[rank][depth - 1]];
-            nodes[nodId].nbPost++;
-
-            // what choosing nodes[i] implies
-            if (nodes[nodId].highest != -1) {
-                int highest = nodes[nodId].highest;
-                int placeInd = highest;
-                int placeIndPrev;
-                do {
-                    placeIndPrev = placeInd;
-                    placeInd = reservationLists[rank][placeIndPrev].prevListInd;
-                } while (reservationLists[rank][placeIndPrev].out == 0 && (placeIndPrev != highest || placeIndPrev - placeInd >= reservationLists[rank][placeIndPrev].data.size));
-				placeInd++;
-                if(placeIndPrev == highest) {
-                    if (reservationRules[rank][placeInd].all == 1) {
-                        int placeInd2 = placeIndPrev - reservationLists[rank][placeIndPrev].data.size + 1;
-                        reservationRules[rank][placeInd2].all = 1;
-                    }
-                    do {
-                        placeIndPrev = placeInd;
-                        placeInd = reservationLists[rank][placeIndPrev].prevListInd;
-                    } while (reservationLists[rank][placeIndPrev].out == 0);
-                }
-                placeInd++;
-                reservationRules[rank][placeInd].resList = -1;
-                reservationLists[rank][placeIndPrev].prevListInd++;
-                placeInd++;
-                if (placeInd<= highest && reservationRules[rank][placeInd].all == 0) {
-                    do {
-                        placeIndPrev = placeInd;
-                        placeInd = reservationLists[rank][placeInd].nextListInd;
-                    } while (placeInd != highest && reservationLists[rank][placeInd].data.size == placeInd - reservationLists[rank][placeInd].prevListInd);
-                    reservationLists[rank][placeIndPrev].nextListInd = -1;
-                    reservationLists[rank][placeInd].out = 1;
-                }
-                removeElement(&(reservationLists[rank][highest].data), nodId);
-            }
-            for (int j = 0; j < nodes[nodId].ulteriors.size; j++) {
-                chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)nodes[nodId].ulteriors.data)[j]);
-            }
-
-            // what being at this depth implies
-            for (int i = 0; i < startExcl[depth].size; i++) {
-                int element = ((int*)endExcl[depth].data)[i];
-                removeFromRest(nodes, rank, depth, element, rests, restsSizes);
-            }
-            for (int i = 0; i < endExcl[depth].size; i++) {
-                chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)startExcl[depth].data)[i]);
-            }
-
-            result[rank][depth] = restsSizes[rank][depth];
-
             if (depth == n) {
-
+                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 // Open the file in write mode
                 FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/overwatch_order.txt", "w");
 
-				int* nodIds = malloc(n * sizeof(int));
+                int* nodIds = malloc(n * sizeof(int));
                 for (int i = 0; i < n; i++) {
-                    if (reservationListsResult[rank][i] == -1) {
-                        nodId = rests[rank][i][result[rank][i]];
+                    if (reservationListsResult[i] == -1) {
+                        nodId = rests[i][result[i]];
                     }
                     else {
-                        nodId = ((int*)reservationLists[rank][reservationListsResult[rank][i]].data.data)[reservationListsElemResult[rank][i]];
+                        nodId = ((int*)reservationLists[reservationListsResult[i]].data.data)[reservationListsElemResult[i]];
                     }
-					nodIds[i] = nodId;
+                    nodIds[i] = nodId;
                     fprintf(file, "%d\n", nodId);
                     printf("%d ", nodId);
                 }
                 printf("\n\n\n");
-				write_to_file("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/overwatch_order.txt", "overwatch_order.txt");
-                call_python_function("SwapRows", sheetCodeName, nodIds, n);
+				modifyFile(sheetPath, error, result, reservationLists, reservationListsResult, reservationListsElemResult, nodIds);
+				errorThrd = *error;
+                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+                befUpdErr = nbItBefUpdErr;
             }
-            if (depth == endI) {
-                if (mpiManagement == 0) {
-                    if (startInd == endStarts) {
-                        return 0;
-                    }
-                    if (startInd < startStarts) {
-                        ascending = 0;
-                    }
-                    startInd++;
-                }
-                else {
-                    if (nbLeaves == nbLeavesMax) {
-                        return 0;
-                    }
-                    nbLeaves++;
+            else if (depth == startDepthThrd) {
+                if (currentLeaf == nextLeafToUse[startDepthThrd]) {
+                    nextLeafToUse[startDepthThrd]++;
+                    ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+                } else {
                     ascending = 0;
                 }
+                currentLeaf++;
             }
+
+            if (ascending == 1) {
+                // ********* update the remaining elements *********
+
+                restsSizes[depth] = restsSizes[depth - 1] - 1;
+
+                // copy the remaining indexes before the chosen one
+                for (int i = 0; i < result[depth - 1]; i++) {
+                    rests[depth][i] = rests[depth - 1][i];
+                }
+
+                // copy the remaining indexes after the chosen one
+                for (int i = result[depth - 1] + 1; i < restsSizes[depth - 1]; i++) {
+                    rests[depth][i - 1] = rests[depth - 1][i];
+                }
+
+
+
+                // ********* consequences of the choice in previous depth *********
+
+                nodId = rests[depth - 1][result[depth - 1]];
+                busyNodes[nodId]++;
+
+                // update the reservation rules
+                if (nodes[nodId].highest != -1) {
+                    int highest = nodes[nodId].highest;
+                    int placeInd = highest;
+                    int placeIndPrev;
+                    do {
+                        placeIndPrev = placeInd;
+                        placeInd = reservationLists[placeIndPrev].prevListInd;
+                    } while (reservationLists[placeIndPrev].out == 0 && (placeIndPrev != highest || placeIndPrev - placeInd >= reservationLists[placeIndPrev].data.size));
+                    placeInd++;
+                    if (placeIndPrev == highest) {
+                        if (reservationRules[placeInd].all == 1) {
+                            int placeInd2 = placeIndPrev - reservationLists[placeIndPrev].data.size + 1;
+                            reservationRules[placeInd2].all = 1;
+                        }
+                        do {
+                            placeIndPrev = placeInd;
+                            placeInd = reservationLists[placeIndPrev].prevListInd;
+                        } while (reservationLists[placeIndPrev].out == 0);
+                    }
+                    placeInd++;
+                    reservationRules[placeInd].resList = -1;
+                    reservationLists[placeIndPrev].prevListInd++;
+                    placeInd++;
+                    if (placeInd <= highest && reservationRules[placeInd].all == 0) {
+                        do {
+                            placeIndPrev = placeInd;
+                            placeInd = reservationLists[placeInd].nextListInd;
+                        } while (placeInd != highest && reservationLists[placeInd].data.size == placeInd - reservationLists[placeInd].prevListInd);
+                        reservationLists[placeIndPrev].nextListInd = -1;
+                        reservationLists[placeInd].out = 1;
+                    }
+                    removeElement(&(reservationLists[highest].data), nodId);
+                }
+                for (int j = 0; j < nodes[nodId].ulteriors.size; j++) {
+                    chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)nodes[nodId].ulteriors.data)[j]);
+                }
+
+                // nodes that can't be chosen there but could before
+                for (int i = 0; i < startExcl[depth].size; i++) {
+                    int element = ((int*)endExcl[depth].data)[i];
+                    removeFromRest(nodes, rank, depth, element, rests, restsSizes);
+                }
+
+                // nodes that can be chosen there but couldn't before
+                for (int i = 0; i < endExcl[depth].size; i++) {
+                    chosenUlt(nodes, rank, depth, rests, restsSizes, ((int*)startExcl[depth].data)[i]);
+                }
+
+                result[depth] = restsSizes[depth];
+            }
+            depth++;
         }
         if (ascending == 0) {
             ascending = 1;
 			befUpdErr--;
 			if (befUpdErr == 0) {
-                errorCopy = min(*error, errorCopy);
+                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
+                errorThrd = *error;
+                modifyFile(sheetPath, result, NULL);
+                if (*nbAwaitingThrd > 0) {
+                    startDepthThrd++;
+                    for (int i = 0; i < startDepthThrd; i++) {
+						result[awaitingThrds[startDepthThrd]][i] = result[i] + 1;
+                    }
+					SetEvent(eventHandlesThd[awaitingThrds[startDepthThrd]]);
+                    (*nbAwaitingThrd)--;
+                }
+                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
 				befUpdErr = nbItBefUpdErr;
 			}
-            if (depth == 0) {
+            if (depth == startDepthThrd) {
+                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
+                if (endDepthThrd != n) {
+					HANDLE* threads = malloc(*nbAwaitingThrd * sizeof(HANDLE));
+                    if (currentLeaf == *nbAwaitingThrd) {
+                        // launch the threads
+                        for (int i = 0; i < *nbAwaitingThrd; i++) {
+
+                        }
+                    }
+                    WaitForMultipleObjects(NUM_THREADS, threads, TRUE, INFINITE);
+                    return;
+                }
+                else {
+                    if (currentLeaf == nextLeafToUse) {
+                        nextLeafToUse++;
+                        ReleaseSemaphore(semaphoreFindStartBranch, 1, NULL); // Release the semaphore
+                    }
+                    else {
+                        ascending = 0;
+                    }
+                    currentLeaf++;
+                }
+            }
+            if (depth == startDepthThrd) {
                 if (nbLeaves!=0) {
                     int restLeaves2 = nbLeaves % nb_process;
                     if (restLeaves2 <= restLeaves) {
@@ -567,11 +805,21 @@ char* concatenate(const char* str1, const char* str2) {
     return result; // Return the concatenated string
 }
 
+void checkForStopSignal() {
+    // Could be a named pipe, event handle, or a file status check
+    HANDLE stopEvent = OpenEvent(EVENT_ALL_ACCESS, FALSE, "StopEvent");
+    if (stopEvent && WaitForSingleObject(stopEvent, 0) == WAIT_OBJECT_0) {
+        stopRequested = true;
+        CloseHandle(stopEvent);
+    }
+}
+
 int main(int argc, char* argv[]) {
+
+
 	// TODO : Check if sortings of similar systems already exist
 
     // Define the parameters
-    int nbItBefUpdErr = 10000; // Define the number of iterations before updating the error
     int nbLeavesMin = 100; // Define the minimum time to sort
     int nbLeavesMax = 1000; // Define the maximum time to sort
     float repartTol = 0.1f; // Define the repartition tolerance
@@ -677,54 +925,53 @@ int main(int argc, char* argv[]) {
     ReservationList** reservationLists = malloc(nb_process * sizeof(ReservationList*));
     int** reservationListsResult = malloc(nb_process * sizeof(int*));
 	int** reservationListsElemResult = malloc(nb_process * sizeof(int*));
+    int* parkingErrors = malloc(n * sizeof(int)); // Store the parking errors
 	int** errors = malloc(nb_process * sizeof(int*)); // Store the current error
-    
-	int depth = 0; // Current depth of the recursion
-    for (int p = 0; p < nb_process; p++) {
-        result[p] = malloc((n + 1) * sizeof(int));
-		rests[p] = malloc((n + 1) * sizeof(int*));
-		restsSizes[p] = malloc((n + 1) * sizeof(int));
-		reservationRules[p] = malloc((n + 1) * sizeof(ReservationRule));
-		reservationLists[p] = malloc((n - 1) * sizeof(ReservationList));
-		reservationListsResult[p] = malloc((n + 1) * sizeof(int));
-		reservationListsElemResult[p] = malloc(n * sizeof(int));
-		errors[p] = malloc(n * sizeof(int));
-        for (int i = 0; i < n + 1; i++) {
-            rests[p][i] = malloc((n - i) * sizeof(int));
-            restsSizes[p][i] = 0;
-            reservationRules[p][i].resList = -1;
-            reservationListsResult[p][i] = -1;
-        }
-        for (int i = 0; i < n; i++) {
-            if (nodes[i].nbPost == 0) {
-                rests[p][0][restsSizes[p][0]] = i;
-                restsSizes[p][0]++;
-            }
-        }
-        for (int i = 0; i < n - 1; i++) {
-            if (reservationLists[p] != NULL) {
-                initList(&(reservationLists[p][i].data), sizeof(int), 1);
-            }
-            else {
-                printf("Error: reservationLists[%d] is NULL\n", p);
-                exit(1);
-            }
-            notChosenAnymore(nodes, n, i, reservationRules[p], reservationLists[p]);
-        }
+	int* lonerErrors = malloc(n * sizeof(int)); // Store the loner errors
+
+	HANDLE* eventHandlesThd = malloc(nb_process * sizeof(HANDLE));
+    HANDLE semaphore;
+    int error = INT_MAX;
+	int* nextLeafToUse = malloc(n * sizeof(int));
+	int nbAwaitingThrd = 0;
+	int* awaitingThrds = malloc(nb_process * sizeof(int));
+	int* reservationListsResult = malloc(n * sizeof(int));
+	int* reservationListsElemResult = malloc(n * sizeof(int));
+	int* result = malloc(n * sizeof(int));
+
+    ThreadParams params = {
+		.eventHandlesThd = eventHandlesThd,
+		.semaphore = &semaphore,
+		.sheetPath = argv[1],
+		.nodes = nodes,
+		.n = n,
+		.rank = 0,
+		.nextLeafToUse = nextLeafToUse,
+		.startDepthThrd = 0,
+		.currentLeaf = 0,
+		.errorThrd = &error,
+		.error = error,
+		.nbAwaitingThrd = &nbAwaitingThrd,
+		.awaitingThrds = awaitingThrds,
+		.reservationListsResult = reservationListsResult,
+		.reservationListsElemResult = reservationListsElemResult,
+		.result = result,
+		.restoreUpTo = 0
+	};
+    // Create thread
+    HANDLE hThread = CreateThread(NULL, 0, threadSort, &params, 0, NULL);
+    if (hThread == NULL) {
+        printf("Error creating thread %d\n", 0);
+        return 1;
     }
-	int error = 0;
-    int starts[] = { 0 }; // Define the starts array
-	int end = 1;
-	int startsSize = -1;
-    try_sort(argv[1], nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, 0, &error, 1, &end, 0, &startsSize);
-    if (startsSize == -1) {
-		printf("Error: startsSize is -1\n");
-		return 1;
-    }
-    int reste = startsSize % nb_process;
-	for (int rank = 0; rank < nb_process; rank++) {
-        try_sort(argv[1], nb_process, nbItBefUpdErr, nbLeavesMin, nbLeavesMax, repartTol, nodes, startExcl, endExcl, result, errors, reservationListsResult, reservationListsElemResult, rests, restsSizes, reservationRules, reservationLists, n, reste, &error, 0, &end, rank, &startsSize);
-	}
+
+    // Wait for threads to complete
+    WaitForMultipleObjects(1, hThread, TRUE, INFINITE);
+
+
+
+
+
     free(result);
     freeNodes(nodes, n);
 
