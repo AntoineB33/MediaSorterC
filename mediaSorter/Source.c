@@ -49,24 +49,30 @@ typedef struct {
 } AttributeMng;
 
 typedef struct {
+	int result;
+    int reservationListsResult;
+	int reservationListsElemResult;
+    int nodeId;
+    int shared;
+} sharing;
+
+typedef struct {
 	HANDLE* eventHandlesThd;
 	HANDLE* semaphore;
     char* sheetPath;
 	Node* nodes;
 	int n;
 	int startingDepth;
-    int nextLeafToUse;
-	int** nextLeafToUseList;
 	int currentLeaf;
     int* error;
 	int errorThrd;
-    int* nbAwaitingThrd;
-	int* awaitingThrds;
+    GenericList* awaitingThrds;
 	GenericList* startExcl;
     GenericList* endExcl;
     int* reservationListsResult;
 	int* reservationListsElemResult;
-	int* result;
+    sharing* result;
+	int* sharers;
     int restoreUpTo;
 } ThreadParams;
 
@@ -136,6 +142,16 @@ void removeElement(GenericList* list, int element) {
 
     // If the element is not found, print a message
     printf("Element not found in the list\n");
+}
+
+void removeInd(GenericList* list, int ind) {
+	// Shift the elements after the index to the left
+	for (int i = ind; i < list->size - 1; i++) {
+		void* src = (char*)list->data + (i + 1) * list->elemSize;
+		void* dst = (char*)list->data + i * list->elemSize;
+		memcpy(dst, src, list->elemSize);
+	}
+	list->size--;  // Reduce the size after removing the element
 }
 
 // Function to free the list
@@ -316,9 +332,9 @@ int all_sorted(int* sorted, int n) {
     return 1;
 }
 
-int check_conditions(Node* nodes, int n, int* resultNodes, int depth, int nodeId) {
+int check_conditions(Node* nodes, int n, sharing* result, int depth) {
 	int is_true = 1;
-	for (int condInd = 0; condInd < nodes[nodeId].conditions_size; condInd++) {
+	for (int condInd = 0; condInd < nodes[result[depth].nodeId].conditions_size; condInd++) {
         is_true = 0;
 	}
 	return is_true;
@@ -455,24 +471,24 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
     // Cast lpParam to the appropriate structure type
     ThreadParamsRank* threadParamsRank = (ThreadParamsRank*)lpParam;
 	int rank = threadParamsRank->rank;
-	ThreadParams* params = &((ThreadParams*)threadParamsRank->allParams)[rank];
+	ThreadParams* allParams = threadParamsRank->allParams;
+	ThreadParams* params = &allParams[rank];
 	HANDLE* eventHandlesThd = params->eventHandlesThd;
 	HANDLE semaphore = *params->semaphore;
 	const char* const sheetPath = params->sheetPath;
 	const Node* const nodes = params->nodes;
 	const int n = params->n;
-    int** const nextLeafToUseList = params->nextLeafToUseList;
-    int** const nextLeafToUse = params->nextLeafToUse;
+	int startDepthThrd = params->startingDepth;
 	int currentLeaf = params->currentLeaf;
 	int* const error = params->error;
     int errorThrd = params->errorThrd;
-	int* const nbAwaitingThrd = params->nbAwaitingThrd;
-	int* const awaitingThrds = params->awaitingThrds;
+    GenericList* const awaitingThrds = params->awaitingThrds;
     GenericList* const startExcl = params->startExcl;
     GenericList* const endExcl = params->endExcl;
 	int* const reservationListsResult = params->reservationListsResult;
 	int* const reservationListsElemResult = params->reservationListsElemResult;
-	int* const result = params->result;
+	sharing* const result = params->result;
+	int* const sharers = params->sharers;
 	int restoreUpTo = params->restoreUpTo;
 
     int placeInd;
@@ -508,6 +524,62 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	int searchingRoot = 0;
 	int* neighborRanks = malloc(n * sizeof(int));
     while (1) {
+
+        // if the tree is shared with another thread at this depth
+        if (result[depth].shared) {
+            WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
+            result[depth].result = allParams[sharers[depth]].result[depth].result;
+            allParams[sharers[depth]].result[depth].result++;
+            ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+        }
+
+        if (reservationRules[depth].resList == -1) {
+            do {
+                if (result[depth].result == rests[depth].size) {
+                    ascending = 0;
+                    break;
+                }
+                result[depth].result++;
+                result[depth].nodeId = ((int*)rests[depth].data)[result[depth].result];
+                if (check_conditions(nodes, n, result, depth)) {
+                    break;
+                }
+            } while (1);
+        }
+        else {
+            found = 0;
+            if (result[depth].result == -1) {
+                placeInd = reservationRules[depth].resList;
+                choiceInd = 0;
+            }
+            else {
+                placeInd = result[depth].result;
+                choiceInd = result[depth].reservationListsElemResult + 1;
+            }
+            result[depth].result = -1;
+            do {
+                for (int i = choiceInd; i < reservationLists[placeInd].data.size; i++) {
+                    result[depth].nodeId = ((int*)reservationLists[placeInd].data.data)[i];
+                    if (nodes[result[depth].nodeId].nbPost == 0 && check_conditions(nodes, n, resultNodes, depth) == 1) {
+                        result[depth].result = placeInd;
+                        result[depth].reservationListsElemResult = i;
+                        found = 1;
+                        break;
+                    }
+                }
+                if (found) {
+                    break;
+                }
+                if (reservationRules[depth].all != 0) {
+                    break;
+                }
+                choiceInd = 0;
+                placeInd = reservationLists[placeInd].nextListInd;
+            } while (placeInd != -1);
+            if (!found) {
+                ascending = 0;
+            }
+        }
         if (ascending == 1) {
             if (depth == n) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
@@ -531,8 +603,8 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 				errorThrd = *error;
                 ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
                 befUpdErr = nbItBefUpdErr;
-            }
-            if (ascending == 1) {
+				ascending = 0;
+            } else {
                 // ********* update the remaining elements *********
 
                 // copy the remaining indexes before the chosen one
@@ -622,25 +694,26 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 errorThrd = *error;
 				modifyFile(sheetPath, error, result, reservationLists, reservationListsResult, reservationListsElemResult, resultNodes);
-                if (*nbAwaitingThrd > 0) {
+                if (awaitingThrds->size > 0) {
+                    removeInd(awaitingThrds, awaitingThrds->size - 1);
+                    ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
                     startDepthThrd++;
+					int otherRank = ((int*)awaitingThrds->data)[awaitingThrds->size];
+                    ThreadParams* otherParams;
+					otherParams = &allParams[otherRank];
                     for (int i = 0; i < startDepthThrd; i++) {
-						result[awaitingThrds[startDepthThrd]][i] = result[i] + 1;
+                        otherParams->result[i].result = result[i].result;
                     }
-					SetEvent(eventHandlesThd[awaitingThrds[startDepthThrd]]);
-                    (*nbAwaitingThrd)--;
+					otherParams->startingDepth = startDepthThrd;
+                    otherParams->result[startDepthThrd].shared = 1;
+                    otherParams->sharers[startDepthThrd] = rank;
+					SetEvent(eventHandlesThd[otherRank]);
                 }
-                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+                else {
+					ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+                }
 				befUpdErr = nbItBefUpdErr;
 			}
-            if (nextLeafToUse) {
-                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-                nextLeafToUseList[neighborRanks[depth]][depth]++;
-                nextLeafToUseList[rank][depth]++;
-                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                nextLeafToUse[rank][depth]++;
-            }
-            if(nextLeafToUse[rank][startDepthThrd]) {
             if (depth == startDepthThrd) {
                 if (nbLeaves!=0) {
                     int restLeaves2 = nbLeaves % nb_process;
@@ -685,59 +758,6 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                     nodes[((int*)endExcl[depth].data)[i]].nbPost++;
                 }
                 depth--;
-            }
-        }
-        if (reservationRules[depth].resList == -1) {
-            do {
-                if (result[depth] == 0) {
-                    ascending = 0;
-                    break;
-                }
-                result[depth]--;
-                currentElement = ((int*)rests[depth].data)[result[depth]];
-                if (check_conditions(nodes, n, resultNodes, depth, currentElement) == 1) {
-                    break;
-                }
-            } while (1);
-        }
-        else {
-            found = 0;
-            if (reservationListsResult[depth] == -1) {
-                placeInd = reservationRules[depth].resList;
-                choiceInd = 0;
-            }
-            else {
-                placeInd = reservationListsResult[depth];
-                choiceInd = reservationListsElemResult[depth] + 1;
-            }
-            reservationListsResult[depth] = -1;
-            do {
-                for (int i = choiceInd; i < reservationLists[placeInd].data.size; i++) {
-                    currentElement = ((int*)reservationLists[placeInd].data.data)[i];
-                    if (nodes[currentElement].nbPost == 0 && check_conditions(nodes, n, resultNodes, depth) == 1) {
-                        reservationListsResult[depth] = placeInd;
-                        reservationListsElemResult[depth] = i;
-                        for (int j = 0; j < restsSizes[depth]; j++) {
-                            if (rests[depth][j] == currentElement) {
-                                result[depth] = j;
-                                break;
-                            }
-                        }
-                        found = 1;
-                        break;
-                    }
-                }
-                if (found) {
-                    break;
-                }
-                if (reservationRules[depth].all != 0) {
-                    break;
-                }
-                choiceInd = 0;
-                placeInd = reservationLists[placeInd].nextListInd;
-            } while (placeInd != -1);
-            if (!found) {
-                ascending = 0;
             }
         }
     }
@@ -879,27 +899,25 @@ int main(int argc, char* argv[]) {
         HANDLE* eventHandlesThd = malloc(nb_process * sizeof(HANDLE));
         HANDLE semaphore;
         int error = INT_MAX;
-        int** nextLeafToUseList = malloc(nb_process * sizeof(int));
-        for (int i = 0; i < nb_process; i++) {
-            nextLeafToUseList[i] = malloc(n * sizeof(int));
-        }
+        sharing* nextLeafToUseList = malloc(nb_process * sizeof(sharing));
         int nbAwaitingThrd = 0;
-        int* awaitingThrds = malloc(nb_process * sizeof(int));
+        GenericList* awaitingThrds;
+		initList(awaitingThrds, sizeof(int), 1);
         GenericList* startExclThrd = malloc(nb_process * sizeof(GenericList));
         GenericList* endExclThrd = malloc(nb_process * sizeof(GenericList));
         for (int i = 0; i < nb_process; i++) {
+            nextLeafToUseList[i].shared = 0;
             initList(&(startExclThrd[i]), sizeof(int), 1);
             initList(&(endExclThrd[i]), sizeof(int), 1);
         }
         int* reservationListsResult = malloc(n * sizeof(int));
         int* reservationListsElemResult = malloc(n * sizeof(int));
-        int* result = malloc(n * sizeof(int));
-		if (i == 0) {
-			result[0] = 0;
+        sharing* result = malloc(n * sizeof(sharing));
+		int* sharers = malloc(n * sizeof(int));
+		for (int i = 0; i < n; i++) {
+			result[i].shared = 0;
+			result[i].result = 0;
 		}
-        else {
-            result[0] = n;
-        }
         ThreadParams params = {
             .eventHandlesThd = eventHandlesThd,
             .semaphore = &semaphore,
@@ -907,18 +925,16 @@ int main(int argc, char* argv[]) {
             .nodes = nodes,
             .n = n,
             .startingDepth = 0,
-            .nextLeafToUse = 0,
-            .nextLeafToUseList = nextLeafToUseList,
             .currentLeaf = 0,
             .error = &error,
             .errorThrd = error,
-            .nbAwaitingThrd = &nbAwaitingThrd,
             .awaitingThrds = awaitingThrds,
             .startExcl = startExcl,
             .endExcl = endExcl,
             .reservationListsResult = reservationListsResult,
             .reservationListsElemResult = reservationListsElemResult,
             .result = result,
+			.sharers = sharers,
             .restoreUpTo = 0
         };
         allParams[i] = params;
@@ -935,13 +951,12 @@ int main(int argc, char* argv[]) {
     }
 
     // Wait for threads to complete
-    WaitForMultipleObjects(1, hThread, TRUE, INFINITE);
+	WaitForMultipleObjects(nb_process, allParams[0].eventHandlesThd, TRUE, INFINITE);
 
 
 
 
-
-    free(result);
+    
     freeNodes(nodes, n);
 
     call_python_function("switchSort", argv[1], NULL, 0);
