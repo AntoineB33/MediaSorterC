@@ -49,12 +49,21 @@ typedef struct {
 } AttributeMng;
 
 typedef struct {
-	int result;
+    int result;
     int reservationListsResult;
-	int reservationListsElemResult;
+    int reservationListsElemResult;
+} resultSt;
+
+typedef struct {
+    resultSt result;
     int nodeId;
     int shared;
 } sharing;
+
+typedef struct {
+	int sharer;
+    resultSt result;
+} sharerResult;
 
 typedef struct {
 	HANDLE* eventHandlesThd;
@@ -72,7 +81,7 @@ typedef struct {
     int* reservationListsResult;
 	int* reservationListsElemResult;
     sharing* result;
-	int* sharers;
+    sharerResult* sharers;
     int restoreUpTo;
 } ThreadParams;
 
@@ -488,7 +497,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	int* const reservationListsResult = params->reservationListsResult;
 	int* const reservationListsElemResult = params->reservationListsElemResult;
 	sharing* const result = params->result;
-	int* const sharers = params->sharers;
+    sharerResult* const sharers = params->sharers;
 	int restoreUpTo = params->restoreUpTo;
 
     int placeInd;
@@ -528,19 +537,17 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         // if the tree is shared with another thread at this depth
         if (result[depth].shared) {
             WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-            result[depth].result = allParams[sharers[depth]].result[depth].result;
-            allParams[sharers[depth]].result[depth].result++;
-            ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+			result[depth].result = sharers[depth].result;
         }
 
         if (reservationRules[depth].resList == -1) {
             do {
-                if (result[depth].result == rests[depth].size) {
+                if (result[depth].result.result == rests[depth].size) {
                     ascending = 0;
                     break;
                 }
-                result[depth].result++;
-                result[depth].nodeId = ((int*)rests[depth].data)[result[depth].result];
+                result[depth].result.result++;
+                result[depth].nodeId = ((int*)rests[depth].data)[result[depth].result.result];
                 if (check_conditions(nodes, n, result, depth)) {
                     break;
                 }
@@ -548,21 +555,21 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         }
         else {
             found = 0;
-            if (result[depth].result == -1) {
+            if (result[depth].result.result == -1) {
                 placeInd = reservationRules[depth].resList;
                 choiceInd = 0;
             }
             else {
-                placeInd = result[depth].result;
-                choiceInd = result[depth].reservationListsElemResult + 1;
+                placeInd = result[depth].result.result;
+                choiceInd = result[depth].result.reservationListsElemResult + 1;
             }
-            result[depth].result = -1;
+            result[depth].result.result = -1;
             do {
                 for (int i = choiceInd; i < reservationLists[placeInd].data.size; i++) {
                     result[depth].nodeId = ((int*)reservationLists[placeInd].data.data)[i];
-                    if (nodes[result[depth].nodeId].nbPost == 0 && check_conditions(nodes, n, resultNodes, depth) == 1) {
-                        result[depth].result = placeInd;
-                        result[depth].reservationListsElemResult = i;
+                    if (busyNodes[result[depth].nodeId] == 0 && check_conditions(nodes, n, resultNodes, depth) == 1) {
+                        result[depth].result.result = placeInd;
+                        result[depth].result.reservationListsElemResult = i;
                         found = 1;
                         break;
                     }
@@ -580,6 +587,13 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 ascending = 0;
             }
         }
+
+        // if the tree is shared with another thread at this depth
+        if (result[depth].shared) {
+            allParams[sharers[depth].sharer].sharers[depth].result = result[depth].result;
+            ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+        }
+
         if (ascending == 1) {
             if (depth == n) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
@@ -689,24 +703,29 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         }
         if (ascending == 0) {
             ascending = 1;
+			result[depth].result.result = -1;
+			depth--;
 			befUpdErr--;
 			if (befUpdErr == 0) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 errorThrd = *error;
 				modifyFile(sheetPath, error, result, reservationLists, reservationListsResult, reservationListsElemResult, resultNodes);
-                if (awaitingThrds->size > 0) {
+                if (awaitingThrds->size > 0 && startDepthThrd < n - 2) {
+					int otherRank = ((int*)awaitingThrds->data)[awaitingThrds->size];
                     removeInd(awaitingThrds, awaitingThrds->size - 1);
                     ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
                     startDepthThrd++;
-					int otherRank = ((int*)awaitingThrds->data)[awaitingThrds->size];
                     ThreadParams* otherParams;
 					otherParams = &allParams[otherRank];
-                    for (int i = 0; i < startDepthThrd; i++) {
+					otherParams->startingDepth = startDepthThrd;
+                    for (int i = 0; i <= startDepthThrd; i++) {
                         otherParams->result[i].result = result[i].result;
                     }
-					otherParams->startingDepth = startDepthThrd;
                     otherParams->result[startDepthThrd].shared = 1;
-                    otherParams->sharers[startDepthThrd] = rank;
+                    otherParams->sharers[startDepthThrd].sharer = rank;
+                    otherParams->sharers[startDepthThrd].result = result[startDepthThrd].result;
+					sharers[startDepthThrd].sharer = otherRank;
+                    sharers[startDepthThrd].result = result[startDepthThrd].result;
 					SetEvent(eventHandlesThd[otherRank]);
                 }
                 else {
@@ -913,7 +932,7 @@ int main(int argc, char* argv[]) {
         int* reservationListsResult = malloc(n * sizeof(int));
         int* reservationListsElemResult = malloc(n * sizeof(int));
         sharing* result = malloc(n * sizeof(sharing));
-		int* sharers = malloc(n * sizeof(int));
+        sharerResult* sharers = malloc(n * sizeof(int));
 		for (int i = 0; i < n; i++) {
 			result[i].shared = 0;
 			result[i].result = 0;
