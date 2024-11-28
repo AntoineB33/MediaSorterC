@@ -13,7 +13,7 @@
 #include <limits.h>
 
 
-#define LOCK_FILE_PATH "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.lock" // Lock file path
+#define max(a, b) ((a) > (b) ? (a) : (b))
 
 
 typedef struct {
@@ -23,13 +23,17 @@ typedef struct {
     size_t elemSize;  // Size of each element
 } GenericList;
 
+typedef struct {
+    int start;
+	int end;
+} allowedPlaceSt;
+
 // Define a structure to represent the graph node
 typedef struct {
 	GenericList ulteriors;	 // List of integers that must come after
-	char** conditions;	   // List of conditions that must be satisfied
-	int conditions_size;   // Number of conditions
+    GenericList conditions;	   // List of conditions that must be satisfied
+	GenericList allowedPlaces;
 	int nbPost;            // Number of nodes that must come before
-    int highest;        // Highest placement allowed for this integer
 } Node;
 
 typedef struct {
@@ -50,14 +54,12 @@ typedef struct {
 
 typedef struct {
     int result;
-    int reservationListsResult;
-    int reservationListsElemResult;
+    int reservationListInd;
 } resultSt;
 
 typedef struct {
     resultSt result;
     int nodeId;
-    int shared;
 } sharing;
 
 typedef struct {
@@ -66,18 +68,22 @@ typedef struct {
 } sharerResult;
 
 typedef struct {
+    int sep;
+	int lastPlace;
+} attributeSt;
+
+typedef struct {
 	HANDLE* eventHandlesThd;
 	HANDLE* semaphore;
     char* sheetPath;
 	Node* nodes;
+	attributeSt* attributes;
 	int n;
-	int startingDepth;
+	int fstSharedDepth;
 	int currentLeaf;
     int* error;
 	int errorThrd;
     GenericList* awaitingThrds;
-	GenericList* startExcl;
-    GenericList* endExcl;
     int* reservationListsResult;
 	int* reservationListsElemResult;
     sharing* result;
@@ -172,11 +178,8 @@ void freeList(GenericList* list) {
 
 void freeNode(Node* node) {
     freeList(&node->ulteriors);
-    for (int i = 0; i < node->conditions_size; i++) {
-        free(node->conditions[i]);
-		freeList(&node->ulteriors);
-    }
-    free(node->conditions);
+    freeList(&node->conditions);
+	freeList(&node->allowedPlaces);
 }
 
 void freeNodes(Node* nodes, size_t nodeCount) {
@@ -186,113 +189,9 @@ void freeNodes(Node* nodes, size_t nodeCount) {
     free(nodes);
 }
 
-void parseJSONToNode(Node** nodes, int* n, const char* filename) {
-    // Open the JSON file
-    FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/data.json", "r");
-    if (file == NULL) {
-        perror("Unable to open file");
-        return;
-    }
-
-
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    // Read the file into a string
-    char* json_data = (char*)malloc(file_size + 1);
-    fread(json_data, 1, file_size, file);
-    fclose(file);
-    json_data[file_size] = '\0';
-
-    // Parse JSON data
-    cJSON* json = cJSON_Parse(json_data);
-    if (json == NULL) {
-        printf("Error parsing JSON\n");
-        free(json_data);
-        return;
-    }
-
-    *n = cJSON_GetArraySize(json);
-    *nodes = malloc(*n * sizeof(Node));
-    for (size_t i = 0; i < *n; i++) {
-        Node* node = &(*nodes)[i];
-        cJSON* nodeJson = cJSON_GetArrayItem(json, i);
-
-        // Parse ulteriors array
-        cJSON* ulteriorsJson = cJSON_GetObjectItem(nodeJson, "ulteriors");
-        int ulteriorsCount = (int)cJSON_GetArraySize(ulteriorsJson);
-        initList(&node->ulteriors, sizeof(int), ulteriorsCount);
-        for (int j = 0; j < ulteriorsCount; j++) {
-            int ulterior = cJSON_GetArrayItem(ulteriorsJson, j)->valueint;
-            addElement(&node->ulteriors, &ulterior);
-        }
-
-        // Parse conditions array
-        cJSON* conditionsJson = cJSON_GetObjectItem(nodeJson, "conditions");
-        node->conditions_size = cJSON_GetArraySize(conditionsJson);
-        node->conditions = (char**)malloc(node->conditions_size * sizeof(char*));
-        for (int j = 0; j < node->conditions_size; j++) {
-            const char* condition = cJSON_GetArrayItem(conditionsJson, j)->valuestring;
-            node->conditions[j] = _strdup(condition);
-        }
-
-        // Parse nbPost and highest
-        node->nbPost = cJSON_GetObjectItem(nodeJson, "nbPost")->valueint;
-        node->highest = cJSON_GetObjectItem(nodeJson, "highest")->valueint;
-    }
-
-    cJSON_Delete(json);
-}
-
-void write_to_file(const char* filename, const char* message) {
-    // Open file for writing
-    HANDLE file = CreateFile(filename, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) {
-        fprintf(stderr, "Error opening file\n");
-        return;
-    }
-
-    // Lock the file for exclusive access
-    OVERLAPPED overlap = { 0 };
-    if (!LockFileEx(file, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlap)) {
-        fprintf(stderr, "Error locking file\n");
-        CloseHandle(file);
-        return;
-    }
-
-    // Move the file pointer to the end for appending
-    SetFilePointer(file, 0, NULL, FILE_END);
-
-    // Write the message to the file
-    DWORD written;
-    WriteFile(file, message, strlen(message), &written, NULL);
-    WriteFile(file, "\n", 1, &written, NULL); // Add newline
-
-    // Unlock and close the file
-    UnlockFileEx(file, 0, MAXDWORD, MAXDWORD, &overlap);
-    CloseHandle(file);
-}
-
-void trigger_python_script(const char* script_path, const char* arg) {
-    // Construct the command to run the Python script with the argument
-    char command[512];  // Adjust buffer size if needed
-    snprintf(command, sizeof(command), "python3 %s %s", script_path, arg);
-
-    // Use the system() function to execute the command
-    int status = system(command);
-    if (status == -1) {
-        perror("Error executing Python script");
-    }
-    else {
-        printf("Python script triggered successfully with argument: %s\n", arg);
-    }
-}
-
 void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
-    if (nodes[i].highest != -1) {
-        int highest = nodes[i].highest;
+    if (nodes[i].allowedPlaces.size) {
+        int highest = ((allowedPlaceSt*)nodes[i].allowedPlaces.data)[nodes[i].allowedPlaces.size - 1].end;
         int resListInd = reservationRules[highest].resList;
         if (resListInd == -1) {
             reservationRules[highest].resList = highest;
@@ -343,50 +242,309 @@ int all_sorted(int* sorted, int n) {
 
 int check_conditions(Node* nodes, int n, sharing* result, int depth) {
 	int is_true = 1;
-	for (int condInd = 0; condInd < nodes[result[depth].nodeId].conditions_size; condInd++) {
+    char* condition;
+	for (int condInd = 0; condInd < nodes[result[depth].nodeId].conditions.size; condInd++) {
+		condition = ((char**)nodes[result[depth].nodeId].conditions.data)[condInd];
         is_true = 0;
 	}
 	return is_true;
 }
 
-// Function to check if the file is locked
-int isFileLocked() {
-    FILE* lockFile = fopen(LOCK_FILE_PATH, "r");
-    if (lockFile) {
-        fclose(lockFile);
-        return 1; // File is locked
+void lockFile(HANDLE* hFile, OVERLAPPED* ov, const char* filePath) {
+    *hFile = CreateFileA(
+        filePath,
+        GENERIC_READ | GENERIC_WRITE,
+        0,              // No sharing
+        NULL,           // Default security
+        OPEN_EXISTING,  // Open an existing file
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+
+    if (hFile == INVALID_HANDLE_VALUE) {
+        printf("Failed to open file. Error: %ld\n", GetLastError());
+        return;
     }
-    return 0; // File is not locked
+
+    ZeroMemory(ov, sizeof(OVERLAPPED));
+
+    printf("Attempting to lock the file...\n");
+
+    // Keep trying to lock until successful
+    while (!LockFileEx(hFile, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &ov)) {
+        Sleep(1000); // Wait for 1 second before retrying
+    }
 }
 
-// Function to acquire the lock
-void acquireLock() {
-    if (isFileLocked()) {
-        fprintf(stderr, "File is locked by another process.\n");
-        exit(1);
-    }
-    FILE* lockFile = fopen(LOCK_FILE_PATH, "w");
-    if (lockFile) {
-        fprintf(lockFile, "LOCK");
-        fclose(lockFile);
-    }
+void unlockFile(HANDLE* hFile, OVERLAPPED* ov) {
+    UnlockFileEx(*hFile, 0, MAXDWORD, MAXDWORD, ov);
+	CloseHandle(*hFile);
 }
 
-// Function to release the lock
-void releaseLock() {
-    remove(LOCK_FILE_PATH);
+int getNodes(Node* nodes, attributeSt* attributes, const char* sheetPath, int* n, int* nb_att) {
+	const char* infoFolder = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/info/";
+
+
+    HANDLE hFile;
+    OVERLAPPED ov;
+
+    // Allocate memory for the full file path
+    size_t filePathSize = strlen(infoFolder) + strlen(sheetPath) + strlen(".txt") + 1;
+    char* filePath = (char*)malloc(filePathSize);
+
+    if (!filePath) {
+        printf("Failed to allocate memory for file path.\n");
+        return -1; // Memory allocation error
+    }
+
+    // Construct the full file path
+    snprintf(filePath, filePathSize, "%s%s.txt", infoFolder, sheetPath);
+    
+    lockFile(&hFile, &ov, filePath);
+
+
+
+    // Open the file for reading
+    FILE* file = fopen(filePath, "r");
+    if (!file) {
+        printf("Failed to open file for reading: %s\n", filePath);
+        unlockFile(&hFile, &ov);
+        free(filePath);
+        return -1;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    size_t fileSize = ftell(file);
+    rewind(file);
+
+    // Read file content into a buffer
+    char* fileContent = (char*)malloc(fileSize + 1);
+    if (!fileContent) {
+        printf("Failed to allocate memory for file content.\n");
+        fclose(file);
+        unlockFile(&hFile, &ov);
+        free(filePath);
+        return -1; // Memory allocation error
+    }
+    fread(fileContent, 1, fileSize, file);
+    fileContent[fileSize] = '\0'; // Null-terminate the JSON string
+    fclose(file);
+
+    // Parse JSON content
+    cJSON* json = cJSON_Parse(fileContent);
+    if (!json) {
+        printf("Failed to parse JSON: %s\n", cJSON_GetErrorPtr());
+        free(fileContent);
+        unlockFile(&hFile, &ov);
+        free(filePath);
+        return -1; // JSON parsing error
+    }
+
+    cJSON* nodesArray = cJSON_GetObjectItem(json, "nodes");
+    int n = cJSON_GetArraySize(nodesArray);
+	nodes = malloc(n * sizeof(Node));
+    if (cJSON_IsArray(nodesArray)) {
+        int i = 0;
+        cJSON* node;
+        cJSON_ArrayForEach(node, nodesArray) {
+
+			cJSON* ulteriorsArray = cJSON_GetObjectItem(node, "ulteriors");
+			int ulteriorsSize = cJSON_GetArraySize(ulteriorsArray);
+			initList(&(nodes[i].ulteriors), sizeof(int), ulteriorsSize);
+            for (int j = 0; j < ulteriorsSize; j++) {
+                int ulterior = cJSON_GetArrayItem(ulteriorsArray, j)->valueint;
+                addElement(&(nodes[i].ulteriors), &ulterior);
+            }
+
+			cJSON* conditionsArray = cJSON_GetObjectItem(node, "conditions");
+			int conditionsSize = cJSON_GetArraySize(conditionsArray);
+			initList(&(nodes[i].conditions), sizeof(char*), conditionsSize);
+			for (int j = 0; j < conditionsSize; j++) {
+				const char* condition = cJSON_GetArrayItem(conditionsArray, j)->valuestring;
+				addElement(&(nodes[i].conditions), &condition);
+			}
+
+			cJSON* allowedPlacesArray = cJSON_GetObjectItem(node, "allowedPlaces");
+			int allowedPlacesSize = cJSON_GetArraySize(allowedPlacesArray);
+			initList(&(nodes[i].allowedPlaces), sizeof(allowedPlaceSt), allowedPlacesSize);
+			for (int j = 0; j < allowedPlacesSize; j++) {
+				cJSON* allowedPlace = cJSON_GetArrayItem(allowedPlacesArray, j);
+				allowedPlaceSt allowedPlaceSt;
+				allowedPlaceSt.start = cJSON_GetObjectItem(allowedPlace, "start")->valueint;
+				allowedPlaceSt.end = cJSON_GetObjectItem(allowedPlace, "end")->valueint;
+				addElement(&(nodes[i].allowedPlaces), &allowedPlaceSt);
+			}
+
+			nodes[i].nbPost = cJSON_GetObjectItem(node, "nbPost")->valueint;
+			i++;
+        }
+    }
+
+	cJSON* attributesArray = cJSON_GetObjectItem(json, "attributes");
+	attributes = malloc(cJSON_GetArraySize(attributesArray) * sizeof(attributeSt));
+	if (cJSON_IsArray(attributesArray)) {
+		int i = 0;
+		cJSON* attribute;
+		cJSON_ArrayForEach(attribute, attributesArray) {
+			attributes[i].lastPlace = -1;
+			attributes[i].sep = cJSON_GetObjectItem(attribute, "sep")->valueint;
+			i++;
+		}
+	}
+
+    // Cleanup
+    cJSON_Delete(json);
+    free(fileContent);
+
+    fclose(file);
+
+    unlockFile(&hFile, &ov);
+}
+
+void getPrevSort(ThreadParams* allParams, Node* nodes, attributeSt* attributes, int nb_process, int n, int nb_att, char* sheetPath) {
+    const char* sort_info_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/sort_info.txt";
+
+
+    HANDLE hFile;
+    OVERLAPPED ov;
+
+    lockFile(&hFile, &ov, sort_info_path);
+
+    // Open the file for reading
+    FILE* file = fopen(sort_info_path, "r");
+    if (!file) {
+        printf("Failed to open file for reading: %s\n", sort_info_path);
+        unlockFile(&hFile, &ov);
+        free(sort_info_path);
+        return -1;
+    }
+
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    size_t fileSize = ftell(file);
+    rewind(file);
+
+    // Read file content into a buffer
+    char* fileContent = (char*)malloc(fileSize + 1);
+    if (!fileContent) {
+        printf("Failed to allocate memory for file content.\n");
+        fclose(file);
+        unlockFile(&hFile, &ov);
+        free(sort_info_path);
+        return -1; // Memory allocation error
+    }
+    fread(fileContent, 1, fileSize, file);
+    fileContent[fileSize] = '\0'; // Null-terminate the JSON string
+    fclose(file);
+
+    // Parse JSON content
+    cJSON* json = cJSON_Parse(fileContent);
+    if (!json) {
+        printf("Failed to parse JSON: %s\n", cJSON_GetErrorPtr());
+        free(fileContent);
+        unlockFile(&hFile, &ov);
+        free(sort_info_path);
+        return -1; // JSON parsing error
+    }
+
+    HANDLE* eventHandlesThd = malloc(nb_process * sizeof(HANDLE));
+    HANDLE semaphore;
+    int error = INT_MAX;
+    int nbAwaitingThrd = 0;
+    GenericList* awaitingThrds;
+    initList(awaitingThrds, sizeof(int), 1);
+	cJSON* sheetsArray = cJSON_GetObjectItem(json, "sheets");
+    if (cJSON_IsArray(sheetsArray)) {
+        int i = 0;
+        cJSON* sheet;
+        cJSON_ArrayForEach(sheet, sheetsArray) {
+            cJSON* threadsArray = cJSON_GetObjectItem(sheet, "threads");
+            if (cJSON_IsArray(threadsArray)) {
+				int threadsArraySize = cJSON_GetArraySize(threadsArray);
+                allParams = malloc(max(nb_process, threadsArraySize) * sizeof(ThreadParams));
+                int j = 0;
+                cJSON* thread;
+                cJSON_ArrayForEach(thread, threadsArray) {
+                    cJSON* resultArray = cJSON_GetObjectItem(thread, "result");
+                    if (cJSON_IsArray(resultArray)) {
+                        int* reservationListsResult = malloc(n * sizeof(int));
+                        int* reservationListsElemResult = malloc(n * sizeof(int));
+                        sharing* result = malloc(n * sizeof(sharing));
+                        sharerResult* sharers = malloc(n * sizeof(int));
+                        int k = 0;
+                        cJSON* resultElmnt;
+                        cJSON_ArrayForEach(resultElmnt, resultArray) {
+                            if (cJSON_IsNumber(resultElmnt)) {
+                                result[k].result.result = resultElmnt->valueint;
+                            }
+                            k++;
+                        }
+                        for (int m = k; m < n; m++) {
+                            result[m].result.result = -1;
+                        }
+                        ThreadParams params = {
+                            .eventHandlesThd = eventHandlesThd,
+                            .semaphore = &semaphore,
+                            .sheetPath = sheetPath,
+                            .nodes = nodes,
+                            .attributes = attributes,
+                            .n = n,
+                            .fstSharedDepth = 0,
+                            .currentLeaf = 0,
+                            .error = &error,
+                            .errorThrd = error,
+                            .awaitingThrds = awaitingThrds,
+                            .reservationListsResult = reservationListsResult,
+                            .reservationListsElemResult = reservationListsElemResult,
+                            .result = result,
+                            .sharers = sharers,
+                            .restoreUpTo = 0
+                        };
+                        allParams[i] = params;
+                    }
+                    j++;
+                }
+                for (int t = threadsArraySize; t < nb_process; t++) {
+                    int* reservationListsResult = malloc(n * sizeof(int));
+                    int* reservationListsElemResult = malloc(n * sizeof(int));
+                    sharing* result = malloc(n * sizeof(sharing));
+                    sharerResult* sharers = malloc(n * sizeof(int));
+                    for (int k = 0; k < n; k++) {
+                        result[k].result.result = -1;
+                    }
+                    ThreadParams params = {
+                        .eventHandlesThd = eventHandlesThd,
+                        .semaphore = &semaphore,
+                        .sheetPath = sheetPath,
+                        .nodes = nodes,
+                        .attributes = attributes,
+                        .n = n,
+                        .fstSharedDepth = 0,
+                        .currentLeaf = 0,
+                        .error = &error,
+                        .errorThrd = error,
+                        .awaitingThrds = awaitingThrds,
+                        .reservationListsResult = reservationListsResult,
+                        .reservationListsElemResult = reservationListsElemResult,
+                        .result = result,
+                        .sharers = sharers,
+                        .restoreUpTo = 0
+                    };
+					allParams[t] = params;
+                }
+            }
+		    break;
+        }
+    }
 }
 
 // Function to search and modify the content in the file
-void modifyFile(const char* const sheetPath, int* const error, int* const result, ReservationList* const reservationLists, int* const reservationListsResult, int* const reservationListsElemResult, int* const resultNodes) {
+void modifyFile(const char* const sheetPath, int* const error) {
     const char* filePath = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/sort_info.txt";
 
     // Open the file in read mode
     FILE* file = fopen(filePath, "r");
-    if (!file) {
-        perror("Failed to open file");
-        return;
-    }
 
     // Get the file size and read the content
     fseek(file, 0, SEEK_END);
@@ -410,16 +568,8 @@ void modifyFile(const char* const sheetPath, int* const error, int* const result
         return;
     }
 
-    cJSON* boolean1 = cJSON_GetObjectItem(json, "complexList");
-	if (boolean1 && cJSON_IsBool(boolean1)) {
-        if (cJSON_IsTrue(boolean1)) {
-			*error = 1;
-        }
-    }
-    else {
-		perror("boolean1 not found.\n");
-        return;
-    }
+	int nbtToUpdate = cJSON_GetObjectItem(json, "nbtToUpdate")->valueint;
+	
 
     // Get the "complexList" array
     cJSON* complexList = cJSON_GetObjectItem(json, "complexList");
@@ -442,28 +592,12 @@ void modifyFile(const char* const sheetPath, int* const error, int* const result
             }
         }
     }
-    else {
-        printf("complexList not found or is not an array.\n");
-    }
 
     // Convert the modified JSON back to a string
     char* modifiedContent = cJSON_Print(json);
-    if (!modifiedContent) {
-        fprintf(stderr, "Error printing JSON\n");
-        cJSON_Delete(json);
-        free(content);
-        return;
-    }
 
     // Write the modified content back to the file
     file = fopen(filePath, "w");
-    if (!file) {
-        perror("Failed to open file for writing");
-        cJSON_Delete(json);
-        free(content);
-        free(modifiedContent);
-        return;
-    }
     fputs(modifiedContent, file);
     fclose(file);
 
@@ -475,6 +609,7 @@ void modifyFile(const char* const sheetPath, int* const error, int* const result
 
 // Recursive function to try all possible ways to sort the integer
 DWORD WINAPI threadSort(LPVOID lpParam) {
+    const int fstNbItBefUpdErr = 50;
     const int nbItBefUpdErr = 10000;
 
     // Cast lpParam to the appropriate structure type
@@ -487,25 +622,22 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	const char* const sheetPath = params->sheetPath;
 	const Node* const nodes = params->nodes;
 	const int n = params->n;
-	int startDepthThrd = params->startingDepth;
+	int fstSharedDepth = params->fstSharedDepth;
 	int currentLeaf = params->currentLeaf;
 	int* const error = params->error;
     int errorThrd = params->errorThrd;
     GenericList* const awaitingThrds = params->awaitingThrds;
-    GenericList* const startExcl = params->startExcl;
-    GenericList* const endExcl = params->endExcl;
 	int* const reservationListsResult = params->reservationListsResult;
 	int* const reservationListsElemResult = params->reservationListsElemResult;
 	sharing* const result = params->result;
     sharerResult* const sharers = params->sharers;
 	int restoreUpTo = params->restoreUpTo;
 
-    int placeInd;
-    int choiceInd;
+	int lastSharedDepth = fstSharedDepth;
 	int ascending = 0;
     int found = 0;
     int currentElement;
-	int befUpdErr = 1;
+	int befUpdErr = fstNbItBefUpdErr;
     int startInd = 0;
     int depth = 0;
     int nodId;
@@ -514,6 +646,8 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	GenericList* const rests = malloc(n * sizeof(GenericList));
     ReservationRule* const reservationRules = malloc((n + 1) * sizeof(ReservationRule));
     ReservationList* const reservationLists = malloc((n - 1) * sizeof(ReservationList));
+	GenericList* const startExcl = malloc(n * sizeof(GenericList));
+	GenericList* const endExcl = malloc(n * sizeof(GenericList));
     int* const errors = malloc(n * sizeof(int));
 	errors[0] = 0;
     for (int i = 0; i < n + 1; i++) {
@@ -522,20 +656,46 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         reservationRules[i].resList = -1;
     }
     for (int i = 0; i < n; i++) {
-        if (busyNodes[i] == 0 && check_conditions(nodes, n, resultNodes, 0, i)) {
+        for (int j = 0; j < nodes[i].allowedPlaces.size; i++) {
+            if (((allowedPlaceSt*)nodes[i].allowedPlaces.data)[j].start != 0) {
+                addElement(&startExcl[((allowedPlaceSt*)nodes[i].allowedPlaces.data)[j].start], i);
+			}
+			else if (j == 0) {
+				busyNodes[i]++;
+			}
+            addElement(&endExcl[((allowedPlaceSt*)nodes[i].allowedPlaces.data)[j].end], i);
+        }
+        if (busyNodes[i] == 0 && check_conditions(nodes, n, result, depth)) {
 			addElement(&(rests[0]), &i);
         }
     }
     for (int i = 0; i < n - 1; i++) {
         initList(&(reservationLists[i].data), sizeof(int), 1);
-        notChosenAnymore(nodes, n, i, reservationRules, reservationLists);
+        notChosenAnymore(nodes, n, i, reservationRules, reservationLists, startExcl, endExcl);
     }
 	int searchingRoot = 0;
 	int* neighborRanks = malloc(n * sizeof(int));
+
+	// all the threads except the first one get in a state of waiting for the first to share.
+    if (rank != 0) {
+        if (reservationRules[0].resList == -1) {
+            result[0].result.result = rests[depth].size;
+        }
+		else {
+			int placeInd = reservationRules[depth].resList;
+            while (placeInd != -1) {
+                placeInd = reservationLists[placeInd].nextListInd;
+            }
+            result[depth].result.result = reservationLists[placeInd].data.size;
+			result[depth].result.reservationListInd = placeInd;
+		}
+    }
+
+    // main loop
     while (1) {
 
         // if the tree is shared with another thread at this depth
-        if (result[depth].shared) {
+        if (depth == lastSharedDepth) {
             WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
 			result[depth].result = sharers[depth].result;
         }
@@ -554,87 +714,75 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
             } while (1);
         }
         else {
-            found = 0;
+            int placeInd;
+            int choiceInd;
             if (result[depth].result.result == -1) {
                 placeInd = reservationRules[depth].resList;
                 choiceInd = 0;
             }
             else {
-                placeInd = result[depth].result.result;
-                choiceInd = result[depth].result.reservationListsElemResult + 1;
+                placeInd = result[depth].result.reservationListInd;
+                choiceInd = result[depth].result.result + 1;
             }
             result[depth].result.result = -1;
+            found = 0;
             do {
                 for (int i = choiceInd; i < reservationLists[placeInd].data.size; i++) {
                     result[depth].nodeId = ((int*)reservationLists[placeInd].data.data)[i];
-                    if (busyNodes[result[depth].nodeId] == 0 && check_conditions(nodes, n, resultNodes, depth) == 1) {
-                        result[depth].result.result = placeInd;
-                        result[depth].result.reservationListsElemResult = i;
+                    if (busyNodes[result[depth].nodeId] == 0 && check_conditions(nodes, n, resultNodes, depth)) {
+                        result[depth].result.reservationListInd = placeInd;
+                        result[depth].result.result = i;
                         found = 1;
                         break;
                     }
                 }
-                if (found) {
-                    break;
+                if (!found) {
+                    if (!reservationRules[depth].all) {
+                        break;
+                    }
+                    choiceInd = 0;
+                    placeInd = reservationLists[placeInd].nextListInd;
                 }
-                if (reservationRules[depth].all != 0) {
-                    break;
-                }
-                choiceInd = 0;
-                placeInd = reservationLists[placeInd].nextListInd;
-            } while (placeInd != -1);
+            } while (!found && placeInd != -1);
             if (!found) {
                 ascending = 0;
             }
         }
 
         // if the tree is shared with another thread at this depth
-        if (result[depth].shared) {
+        if (depth == lastSharedDepth) {
             allParams[sharers[depth].sharer].sharers[depth].result = result[depth].result;
             ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
         }
 
         if (ascending == 1) {
+
             if (depth == n) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 // Open the file in write mode
                 FILE* file = fopen("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/overwatch_order.txt", "w");
-
-                int* nodIds = malloc(n * sizeof(int));
-                for (int i = 0; i < n; i++) {
-                    if (reservationListsResult[i] == -1) {
-                        nodId = ((int*)rests[i].data)[result[i]];
-                    }
-                    else {
-                        nodId = ((int*)reservationLists[reservationListsResult[i]].data.data)[reservationListsElemResult[i]];
-                    }
-                    nodIds[i] = nodId;
-                    fprintf(file, "%d\n", nodId);
-                    printf("%d ", nodId);
-                }
-                printf("\n\n\n");
-				modifyFile(sheetPath, error, result, reservationLists, reservationListsResult, reservationListsElemResult, nodIds);
+				modifyFile(sheetPath, error, result);
 				errorThrd = *error;
                 ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
                 befUpdErr = nbItBefUpdErr;
 				ascending = 0;
-            } else {
+            }
+            else {
+
+                depth++;
+                nodId = result[depth - 1].nodeId;
                 // ********* update the remaining elements *********
 
                 // copy the remaining indexes before the chosen one
-                for (int i = 0; i < result[depth - 1]; i++) {
-                    addElement(&(rests[depth]), &((int*)rests[depth - 1].data)[i]);
-                }
-
-                // copy the remaining indexes after the chosen one
-                for (int i = result[depth - 1]; i < rests[depth - 1].size - 1; i++) {
-					addElement(&(rests[depth]), &((int*)rests[depth - 1].data)[i + 1]);
+                for (int i = 0; i < rests[depth - 1].size; i++) {
+					if (((int*)rests[depth - 1].data)[i] != nodId) {
+						addElement(&(rests[depth]), &((int*)rests[depth - 1].data)[i]);
+					}
                 }
 
 
                 // ********* consequences of the choice in previous depth *********
 
-                nodId = ((int*)rests[depth - 1].data)[result[depth - 1]];
                 busyNodes[nodId]++;
 
                 // update the reservation rules
@@ -696,13 +844,13 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                         addElement(&(rests[depth]), &element);
                     }
                 }
-
-                result[depth] = rests[depth].size;
             }
-            depth++;
         }
         if (ascending == 0) {
-            ascending = 1;
+			ascending = 1;
+            if (depth == fstSharedDepth) {
+
+            }
 			result[depth].result.result = -1;
 			depth--;
 			befUpdErr--;
@@ -710,22 +858,21 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 errorThrd = *error;
 				modifyFile(sheetPath, error, result, reservationLists, reservationListsResult, reservationListsElemResult, resultNodes);
-                if (awaitingThrds->size > 0 && startDepthThrd < n - 2) {
+                if (awaitingThrds->size > 0 && lastSharedDepth < n - 2) {
 					int otherRank = ((int*)awaitingThrds->data)[awaitingThrds->size];
                     removeInd(awaitingThrds, awaitingThrds->size - 1);
                     ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                    startDepthThrd++;
+                    lastSharedDepth++;
                     ThreadParams* otherParams;
 					otherParams = &allParams[otherRank];
-					otherParams->startingDepth = startDepthThrd;
-                    for (int i = 0; i <= startDepthThrd; i++) {
+					otherParams->fstSharedDepth = lastSharedDepth;
+                    for (int i = 0; i <= lastSharedDepth; i++) {
                         otherParams->result[i].result = result[i].result;
                     }
-                    otherParams->result[startDepthThrd].shared = 1;
-                    otherParams->sharers[startDepthThrd].sharer = rank;
-                    otherParams->sharers[startDepthThrd].result = result[startDepthThrd].result;
-					sharers[startDepthThrd].sharer = otherRank;
-                    sharers[startDepthThrd].result = result[startDepthThrd].result;
+                    otherParams->sharers[lastSharedDepth].sharer = rank;
+                    otherParams->sharers[lastSharedDepth].result = result[lastSharedDepth].result;
+					sharers[lastSharedDepth].sharer = otherRank;
+                    sharers[lastSharedDepth].result = result[lastSharedDepth].result;
 					SetEvent(eventHandlesThd[otherRank]);
                 }
                 else {
@@ -813,150 +960,15 @@ void checkForStopSignal() {
 }
 
 int main(int argc, char* argv[]) {
-
-
-	// TODO : Check if sortings of similar systems already exist
-
-    // Define the parameters
-    int nbLeavesMin = 100; // Define the minimum time to sort
-    int nbLeavesMax = 1000; // Define the maximum time to sort
-    float repartTol = 0.1f; // Define the repartition tolerance
-
-
-    // example of nodes, startExcl, endExcl and attributeMngs
-
-    int n; // Define the number of integers to sort
-    int nb_att = 0; // Define the number of attributes
-
-    // Dynamically allocate memory for the array of nodes
-    Node* nodes;
-
-
-
-    Node node;
-    char* path = concatenate("C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/", argv[1]);
-    path = concatenate(path, ".json");
-    parseJSONToNode(&nodes, &n, path);
-
-
-    for (size_t i = 0; i < n; i++) {
-        Node* node = &nodes[i];
-        printf("Node %zu:\n", i + 1);
-
-        printf("  Ulteriors: ");
-        for (size_t j = 0; j < node->ulteriors.size; j++) {
-            int* value = (int*)((char*)node->ulteriors.data + j * sizeof(int));
-            printf("%d ", *value);
-        }
-        printf("\n");
-
-        printf("  Conditions: ");
-        for (int j = 0; j < node->conditions_size; j++) {
-            printf("%s ", node->conditions[j]);
-        }
-        printf("\n");
-
-        printf("  nbPost: %d\n", node->nbPost);
-        printf("  highest: %d\n", node->highest);
-    }
-
-    /*freeNodes(nodes, n);
-    return 0;*/
-
-
-    GenericList* startExcl = malloc((n + 1) * sizeof(GenericList));
-    GenericList* endExcl = malloc((n + 1) * sizeof(GenericList));
-    AttributeMng* attributeMngs = malloc(nb_att * sizeof(AttributeMng));
-
-    /*nodes[0].highest = -1;
-    initList(&(nodes[0].ulteriors), sizeof(int), 1);
-    nodes[0].conditions_size = 0;
-    nodes[0].conditions = malloc(0 * sizeof(char*));
-
-    nodes[1].highest = -1;
-    initList(&(nodes[1].ulteriors), sizeof(int), 1);
-    int value = 0;
-	addElement(&(nodes[1].ulteriors), &value);
-    nodes[1].conditions_size = 0;
-    nodes[1].conditions = malloc(0 * sizeof(char*));
-
-    nodes[2].highest = -1;
-    initList(&(nodes[2].ulteriors), sizeof(int), 1);
-    value = 0;
-    addElement(&(nodes[2].ulteriors), &value);
-    nodes[2].conditions_size = 0;
-    nodes[2].conditions = malloc(0 * sizeof(char*));
-
-    nodes[3].highest = -1;
-    initList(&(nodes[3].ulteriors), sizeof(int), 1);
-	value = 1;
-	addElement(&(nodes[3].ulteriors), &value);
-	value = 2;
-	addElement(&(nodes[3].ulteriors), &value);
-    nodes[3].conditions_size = 0;
-    nodes[3].conditions = malloc(0 * sizeof(char*));*/
-
-    for (int i = 0; i < n + 1; i++) {
-        initList(&(startExcl[i]), sizeof(int), 1);
-        initList(&(endExcl[i]), sizeof(int), 1);
-    }
-
-
-    for (int i = 0; i < n; i++) {
-        nodes[i].nbPost = 0;
-        for (int j = 0; j < nodes[i].ulteriors.size; j++) {
-            int ulterior = ((int*)nodes[i].ulteriors.data)[j];
-            nodes[ulterior].nbPost++;
-        }
-    }
-
-
+    ThreadParams* allParams;
+	Node* nodes;
+	attributeSt* attributes;
     int nb_process = 1;
-
-	ThreadParams* allParams = malloc(nb_process * sizeof(ThreadParams));
+    int n;
+    int nb_att;
+	getNodes(nodes, attributes, argv[1], &n, &nb_att);
+    getPrevSort(allParams, nodes, attributes, nb_process, n, nb_att, argv[1]);
     for (int i = 0; i < nb_process; i++) {
-        HANDLE* eventHandlesThd = malloc(nb_process * sizeof(HANDLE));
-        HANDLE semaphore;
-        int error = INT_MAX;
-        sharing* nextLeafToUseList = malloc(nb_process * sizeof(sharing));
-        int nbAwaitingThrd = 0;
-        GenericList* awaitingThrds;
-		initList(awaitingThrds, sizeof(int), 1);
-        GenericList* startExclThrd = malloc(nb_process * sizeof(GenericList));
-        GenericList* endExclThrd = malloc(nb_process * sizeof(GenericList));
-        for (int i = 0; i < nb_process; i++) {
-            nextLeafToUseList[i].shared = 0;
-            initList(&(startExclThrd[i]), sizeof(int), 1);
-            initList(&(endExclThrd[i]), sizeof(int), 1);
-        }
-        int* reservationListsResult = malloc(n * sizeof(int));
-        int* reservationListsElemResult = malloc(n * sizeof(int));
-        sharing* result = malloc(n * sizeof(sharing));
-        sharerResult* sharers = malloc(n * sizeof(int));
-		for (int i = 0; i < n; i++) {
-			result[i].shared = 0;
-			result[i].result = 0;
-		}
-        ThreadParams params = {
-            .eventHandlesThd = eventHandlesThd,
-            .semaphore = &semaphore,
-            .sheetPath = argv[1],
-            .nodes = nodes,
-            .n = n,
-            .startingDepth = 0,
-            .currentLeaf = 0,
-            .error = &error,
-            .errorThrd = error,
-            .awaitingThrds = awaitingThrds,
-            .startExcl = startExcl,
-            .endExcl = endExcl,
-            .reservationListsResult = reservationListsResult,
-            .reservationListsElemResult = reservationListsElemResult,
-            .result = result,
-			.sharers = sharers,
-            .restoreUpTo = 0
-        };
-        allParams[i] = params;
         ThreadParamsRank allParamsRank = {
             .allParams = allParams,
             .rank = i
