@@ -90,6 +90,7 @@ typedef struct {
     sharing* result;
     sharerResult* sharers;
     int restoreUpTo;
+    int stopSignal;
 } ThreadParams;
 
 typedef struct {
@@ -119,6 +120,11 @@ void initList(GenericList* list, size_t elemSize, size_t initialCapacity) {
     list->size = 0;
     list->capacity = initialCapacity;
     list->elemSize = elemSize;
+}
+
+//get last element
+void* getLastElement(GenericList* list) {
+	return (char*)list->data + (list->size - 1) * list->elemSize;
 }
 
 // Function to add an element to the list
@@ -192,7 +198,7 @@ void freeNodes(Node* nodes, size_t nodeCount) {
 
 void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
     if (nodes[i].allowedPlaces.size) {
-        int highest = ((allowedPlaceSt*)nodes[i].allowedPlaces.data)[nodes[i].allowedPlaces.size - 1].end;
+        int highest = ((allowedPlaceSt*)getLastElement(&nodes[i].allowedPlaces))->end;
         int resListInd = reservationRules[highest].resList;
         if (resListInd == -1) {
             reservationRules[highest].resList = highest;
@@ -282,7 +288,7 @@ void unlockFile(HANDLE* hFile, OVERLAPPED* ov) {
 	CloseHandle(*hFile);
 }
 
-int getNodes(const char* const infoFolder, Node* nodes, attributeSt* attributes, const char* sheetPath, int* n, int* nb_att) {
+int getNodes(const char* const infoFolder, Node* nodes, attributeSt* attributes, char* sheetPath, int* n, int* nb_att) {
     HANDLE hFile;
     OVERLAPPED ov;
 
@@ -433,17 +439,20 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
     fileContent[fileSize] = '\0'; // Null-terminate the JSON string
     fclose(file);
 
+
     // Parse JSON content
     cJSON* json = cJSON_Parse(fileContent);
     if (!json) {
         printf("Failed to parse JSON: %s\n", cJSON_GetErrorPtr());
         free(fileContent);
-        unlockFile(&hFile, &ov);
         free(sort_info_path);
         return -1; // JSON parsing error
     }
 
     HANDLE* eventHandlesThd = malloc(nb_process * sizeof(HANDLE));
+	for (int i = 0; i < nb_process; i++) {
+		eventHandlesThd[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
+	}
     HANDLE semaphore;
     int error = INT_MAX;
     int nbAwaitingThrd = 0;
@@ -469,10 +478,11 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
                     int* reservationListsElemResult = malloc(n * sizeof(int));
                     sharing* result = malloc(n * sizeof(sharing));
                     sharerResult* sharers = malloc(n * sizeof(int));
+					cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
                     int k = 0;
                     cJSON* resultElmnt;
-                    if (cJSON_IsArray(thread)) {
-                        cJSON_ArrayForEach(resultElmnt, thread) {
+                    if (cJSON_IsArray(resultJS)) {
+                        cJSON_ArrayForEach(resultElmnt, resultJS) {
                             cJSON* resultAtt = cJSON_GetObjectItem(thread, "result");
                             cJSON* reservationListInd = cJSON_GetObjectItem(thread, "reservationListInd");
                             if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
@@ -485,6 +495,20 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
                     for (int m = k; m < n; m++) {
                         result[m].result.result = -1;
                     }
+					cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
+					k = 0;
+					cJSON* sharer;
+					if (cJSON_IsArray(sharersJS)) {
+						cJSON_ArrayForEach(sharer, sharersJS) {
+							cJSON* sharerAtt = cJSON_GetObjectItem(thread, "sharer");
+							cJSON* resultAtt = cJSON_GetObjectItem(thread, "result");
+							if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
+								sharers[k].sharer = sharerAtt->valueint;
+								sharers[k].result.result = resultAtt->valueint;
+							}
+							k++;
+						}
+					}
                     ThreadParams params = {
                         .sort_info_path = sort_info_path,
                         .eventHandlesThd = eventHandlesThd,
@@ -502,7 +526,8 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
                         .reservationListsElemResult = reservationListsElemResult,
                         .result = result,
                         .sharers = sharers,
-                        .restoreUpTo = 0
+                        .restoreUpTo = 0,
+                        .stopSignal = 0
                     };
 					addElement(&allParams[j], &params);
                     j++;
@@ -532,7 +557,8 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
                         .reservationListsElemResult = reservationListsElemResult,
                         .result = result,
                         .sharers = sharers,
-                        .restoreUpTo = 0
+                        .restoreUpTo = 0,
+                        .stopSignal = 0
                     };
                     addElement(&allParams[t], &params);
                 }
@@ -540,14 +566,12 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
 		    break;
         }
     }
+    unlockFile(&hFile, &ov);
+
 
     // Cleanup
     cJSON_Delete(json);
     free(fileContent);
-
-    fclose(file);
-
-    unlockFile(&hFile, &ov);
 }
 
 // Function to search and modify the content in the file
@@ -593,8 +617,6 @@ void modifyFile(const char* const sort_info_path, const char* const sheetPath, i
         free(sort_info_path);
         return -1; // JSON parsing error
     }
-
-	int nbtToUpdate = cJSON_GetObjectItem(json, "nbtToUpdate")->valueint;
 	
 
     cJSON* sheetsArray = cJSON_GetObjectItem(json, "sheets");
@@ -605,12 +627,11 @@ void modifyFile(const char* const sort_info_path, const char* const sheetPath, i
 			if (sheetName && cJSON_IsString(sheetName) && strcmp(sheetName->valuestring, sheetPath) != 0) {
 				continue;
 			}
-			cJSON* errorJS = cJSON_GetObjectItem(sheet, "error");
-            if (errorJS && cJSON_IsNumber(errorJS)) {
-				cJSON_ReplaceItemInObject(sheet, "error", *threadParamsRank->allParams[threadParamsRank->rank].error);
-            }
             if (isCompleteSorting) {
-                cJSON_ReplaceItemInObject(sheet, "error", cJSON_CreateNumber(*threadParamsRank->allParams[threadParamsRank->rank].error));
+                cJSON* errorJS = cJSON_GetObjectItem(sheet, "error");
+                if (errorJS && cJSON_IsNumber(errorJS)) {
+                    cJSON_ReplaceItemInObject(sheet, "error", cJSON_CreateNumber(threadParamsRank->allParams[threadParamsRank->rank].errorThrd));
+                }
                 cJSON* resultNodesArray = cJSON_GetObjectItem(sheet, "resultNodes");
                 if (resultNodesArray && cJSON_IsArray(resultNodesArray)) {
                     for (int j = 0; j < n; j++) {
@@ -618,18 +639,50 @@ void modifyFile(const char* const sort_info_path, const char* const sheetPath, i
                     }
                 }
             }
+            cJSON* toUpdateJS = cJSON_GetObjectItem(sheet, "toUpdate");
+            int toUpdate;
+            if (toUpdateJS && cJSON_IsNumber(toUpdateJS)) {
+                toUpdate = toUpdateJS->valueint;
+            }
+            if (toUpdate) {
+                if (isCompleteSorting) {
+                    int* resultNodes = malloc(n * sizeof(int));
+                    for (int j = 0; j < n; j++) {
+                        resultNodes[j] = threadParamsRank->allParams[threadParamsRank->rank].result[j].nodeId;
+                    }
+                    // call VBA
+                }
+                int updated;
+                cJSON* updatedJS = cJSON_GetObjectItem(sheet, "updatedJS");
+                if (updatedJS && cJSON_IsNumber(updatedJS)) {
+                    updated = updatedJS->valueint;
+                }
+                else if (updated) {
+					int* resultNodes = malloc(n * sizeof(int));
+                    cJSON* resultNodesArray = cJSON_GetObjectItem(sheet, "resultNodes");
+					if (resultNodesArray && cJSON_IsArray(resultNodesArray)) {
+						for (int j = 0; j < n; j++) {
+							resultNodes[j] = cJSON_GetArrayItem(resultNodesArray, j)->valueint;
+						}
+					}
+                    // call VBA
+                }
+            }
+            else if (isCompleteSorting) {
+				cJSON_ReplaceItemInObject(sheet, "updated", cJSON_CreateNumber(0));
+            }
             cJSON* threadsArray = cJSON_GetObjectItem(sheet, "threads");
             if (threadsArray && cJSON_IsArray(threadsArray)) {
                 int j = 0;
                 cJSON* thread = cJSON_GetArrayItem(sheetsArray, threadParamsRank->rank);
 				if (thread && cJSON_IsArray(thread)) {
-					cJSON* thread = cJSON_GetArrayItem(threadsArray, threadParamsRank->rank);
-                    if (thread && cJSON_IsArray(thread)) {
+					cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
+					if (resultJS && cJSON_IsArray(resultJS)) {
                         int k = 0;
                         cJSON* resultElmnt;
-                        cJSON_ArrayForEach(resultElmnt, thread) {
-                            cJSON* resultAtt = cJSON_GetObjectItem(thread, "result");
-                            cJSON* reservationListInd = cJSON_GetObjectItem(thread, "reservationListInd");
+                        cJSON_ArrayForEach(resultElmnt, resultJS) {
+                            cJSON* resultAtt = cJSON_GetObjectItem(resultElmnt, "result");
+                            cJSON* reservationListInd = cJSON_GetObjectItem(resultElmnt, "reservationListInd");
                             if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
 								cJSON_ReplaceItemInObject(resultElmnt, "result", cJSON_CreateNumber(threadParamsRank->allParams[threadParamsRank->rank].result[k].result.result));
 								cJSON_ReplaceItemInObject(resultElmnt, "reservationListInd", cJSON_CreateNumber(threadParamsRank->allParams[threadParamsRank->rank].result[k].result.reservationListInd));
@@ -637,10 +690,40 @@ void modifyFile(const char* const sort_info_path, const char* const sheetPath, i
                             k++;
                         }
                     }
+					cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
+					if (sharersJS && cJSON_IsArray(sharersJS)) {
+						int k = 0;
+						cJSON* sharer;
+						cJSON_ArrayForEach(sharer, sharersJS) {
+							cJSON* sharerAtt = cJSON_GetObjectItem(sharer, "sharer");
+							cJSON* resultAtt = cJSON_GetObjectItem(sharer, "result");
+							if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
+								cJSON_ReplaceItemInObject(sharer, "sharer", cJSON_CreateNumber(threadParamsRank->allParams[threadParamsRank->rank].sharers[k].sharer));
+								cJSON_ReplaceItemInObject(sharer, "result", cJSON_CreateNumber(threadParamsRank->allParams[threadParamsRank->rank].sharers[k].result.result));
+							}
+							k++;
+						}
+					}
                     break;
 				}
             }
             break;
+        }
+    }
+
+	cJSON* waitingSheets = cJSON_GetObjectItem(json, "waitingSheets");
+    if (waitingSheets && cJSON_IsArray(waitingSheets)) {
+        int stopAll = (cJSON_GetArraySize(waitingSheets) == 0);
+        if (stopAll == 0) {
+            cJSON* waitingSheet = cJSON_GetArrayItem(waitingSheets, 0);
+            if (waitingSheet && cJSON_IsString(waitingSheet)) {
+                stopAll = (waitingSheet->valuestring != sheetPath);
+            }
+        }
+        if (stopAll) {
+			if (threadParamsRank->allParams[threadParamsRank->rank].stopSignal == 0) {
+
+			}
         }
     }
 
@@ -651,6 +734,7 @@ void modifyFile(const char* const sort_info_path, const char* const sheetPath, i
     fclose(file);
 
     unlockFile(&hFile, &ov);
+    return;
 }
 
 // Recursive function to try all possible ways to sort the integer
@@ -804,9 +888,15 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 
         if (ascending == 1) {
             if (depth == n) {
+				errorThrd = errors[n - 1];
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-				errorThrd = *error;
-				modifyFile(sort_info_path, sheetPath, n, threadParamsRank, errors[depth] < errorThrd);
+                if (errorThrd < *error) {
+                    *error = errorThrd;
+                }
+                else {
+					errorThrd = *error;
+                }
+				modifyFile(sort_info_path, sheetPath, n, threadParamsRank, errorThrd < *error);
                 ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
 				befUpdErr = nbItBefUpdErr;
 				ascending = 0;
@@ -830,7 +920,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 
                 // update the reservation rules
                 if (nodes[nodId].allowedPlaces.size) {
-                    int highest = ((int*)nodes[nodId].allowedPlaces.data)[nodes[nodId].allowedPlaces.size - 1];
+					int highest = ((allowedPlaceSt*)getLastElement(&nodes[nodId].allowedPlaces))->end;
                     int placeInd = highest;
                     int placeIndPrev;
                     do {
@@ -891,20 +981,20 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         }
         if (ascending == 0) {
 			ascending = 1;
+			result[depth].result.result = -1;
+			depth--;
             if (depth == fstSharedDepth) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 errorThrd = *error;
-				addElement(awaitingThrds, &rank);
+                addElement(awaitingThrds, &rank);
                 ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-				WaitForSingleObject(eventHandlesThd[0], INFINITE);
+                WaitForSingleObject(eventHandlesThd[rank], INFINITE);
             }
-			result[depth].result.result = -1;
-			depth--;
 			befUpdErr--;
 			if (befUpdErr == 0) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 errorThrd = *error;
-				modifyFile(sheetPath, error, result, reservationLists, reservationListsResult, reservationListsElemResult, resultNodes);
+				modifyFile(sort_info_path, sheetPath, n, threadParamsRank, 0);
                 if (awaitingThrds->size > 0 && lastSharedDepth < n - 2) {
 					int otherRank = ((int*)awaitingThrds->data)[awaitingThrds->size];
                     removeInd(awaitingThrds, awaitingThrds->size - 1);
@@ -980,21 +1070,25 @@ int main(int argc, char* argv[]) {
     const char* sort_info_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/sort_info.txt";
 
 
+    int nb_process = 1;
+
+
     GenericList* allParams;
 	Node* nodes;
 	attributeSt* attributes;
-    int nb_process = 1;
     int n;
     int nb_att;
-	getNodes(sort_info_path, nodes, attributes, argv[1], &n, &nb_att);
-    getPrevSort(sort_info_path, allParams, nodes, attributes, nb_process, n, nb_att, argv[1]);
+    HANDLE* hThread = malloc(nb_process * sizeof(HANDLE));
+	char* sheetPath = getSheetPath(sort_info_path);
+	getNodes(sort_info_path, nodes, attributes, sheetPath, &n, &nb_att);
+    getPrevSort(sort_info_path, allParams, nodes, attributes, nb_process, n, nb_att, sheetPath);
     for (int i = 0; i < nb_process; i++) {
         ThreadParamsRank allParamsRank = {
             .allParams = allParams,
             .rank = i
         };
         // Create thread
-        HANDLE hThread = CreateThread(NULL, 0, threadSort, &allParamsRank, 0, NULL);
+        hThread[i] = CreateThread(NULL, 0, threadSort, &allParamsRank, 0, NULL);
         if (hThread == NULL) {
             printf("Error creating thread %d\n", 0);
             return 1;
@@ -1002,11 +1096,12 @@ int main(int argc, char* argv[]) {
     }
 
     // Wait for threads to complete
-	WaitForMultipleObjects(nb_process, ((ThreadParams*)allParams->data)[0].eventHandlesThd, TRUE, INFINITE);
-    
-    freeNodes(nodes, n);
+	WaitForMultipleObjects(nb_process, hThread, TRUE, INFINITE);
 
-    call_python_function("switchSort", argv[1], NULL, 0);
+    // Close thread handles
+    for (int i = 0; i < nb_process; ++i) {
+        CloseHandle(hThread[i]);
+    }
 
     return 0;
 }
