@@ -30,9 +30,12 @@ typedef struct {
 
 // Define a structure to represent the graph node
 typedef struct {
-	GenericList ulteriors;	 // List of integers that must come after
-    GenericList conditions;	   // List of conditions that must be satisfied
-	GenericList allowedPlaces;
+	int* ulteriors;	 // List of integers that must come after
+    int nb_ulteriors;
+    char** conditions;	   // List of conditions that must be satisfied
+    int conditions;
+    allowedPlaceSt* allowedPlaces;
+    int nb_allowedPlaces;
 	int nbPost;            // Number of nodes that must come before
 } Node;
 
@@ -75,7 +78,8 @@ typedef struct {
 typedef struct {
 	int fstSharedDepth;
 	int currentLeaf;
-    GenericList* awaitingThrds;
+    int* awaitingThrds;
+    int nb_awaitingThrds;
     sharing* result;
     sharerResult* sharers;
 } ThreadParams;
@@ -88,13 +92,15 @@ typedef struct {
 typedef struct {
     const char* sort_info_path;
     HANDLE* semaphore;
-    GenericList threadEvent;
+    ThreadEvent* threadEvent;
 	int nb_process;
     char* sheetID;
-    GenericList nodes;
-    GenericList attributes;
+    Node* nodes;
+    int n;
+    attributeSt* attributes;
+    int nb_att;
     int error;
-    GenericList allParams;
+    ThreadParams* allParams;
 } MeetPoint;
 
 typedef struct {
@@ -135,7 +141,7 @@ void* getLastElement(GenericList* list) {
 void addElement(GenericList* list, void* element) {
     // Check if the list is full and resize if needed
     if (list->size == list->capacity) {
-        list->capacity *= 2;
+        list->capacity++;
         void* newData = realloc(list->data, list->capacity * list->elemSize);
         if (newData == NULL) {
             printf("Memory reallocation failed\n");
@@ -170,7 +176,7 @@ void removeElement(GenericList* list, int element) {
     printf("Element not found in the list\n");
 }
 
-void removeInd(GenericList* list, int ind) {
+void removeIndGL(GenericList* list, int ind) {
 	// Shift the elements after the index to the left
 	for (int i = ind; i < list->size - 1; i++) {
 		void* src = (char*)list->data + (i + 1) * list->elemSize;
@@ -178,6 +184,15 @@ void removeInd(GenericList* list, int ind) {
 		memcpy(dst, src, list->elemSize);
 	}
 	list->size--;  // Reduce the size after removing the element
+}
+
+void removeInd(void* list, int listSize, int ind, size_t elemSize) {
+    // Shift the elements after the index to the left
+    for (int i = ind; i < listSize - 1; i++) {
+        void* src = (char*)list + (i + 1) * elemSize;
+        void* dst = (char*)list + i * elemSize;
+        memcpy(dst, src, elemSize);
+    }
 }
 
 // Function to free the list
@@ -200,9 +215,9 @@ void freeNodes(Node* nodes, size_t nodeCount) {
     free(nodes);
 }
 
-void notChosenAnymore(Node* nodes, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
-    if (nodes[i].allowedPlaces.size) {
-        int highest = ((allowedPlaceSt*)getLastElement(&nodes[i].allowedPlaces))->end;
+void notChosenAnymore(Node* node, int n, int i, ReservationRule* reservationRules, ReservationList* reservationLists) {
+    if (node->allowedPlaces.size) {
+        int highest = ((allowedPlaceSt*)getLastElement(&node->allowedPlaces))->end;
         int resListInd = reservationRules[highest].resList;
         if (resListInd == -1) {
             reservationRules[highest].resList = highest;
@@ -577,11 +592,35 @@ void getPrevSort(const char* const sort_info_path, GenericList* allParams, Node*
 }
 
 // Function to search and modify the content in the file
-int modifyFile(const char* const sort_info_path, char* const sheetID, int n, ThreadParamsRank* threadParamsRank, int isCompleteSorting) {
+int modifyFile(ThreadParamsRank* threadParamsRank, int depth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int isCompleteSorting) {
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+    char* sort_info_path = meetPoint->sort_info_path;
+    HANDLE* semaphore = meetPoint->semaphore;
+    ThreadEvent* threadEvent = meetPoint->threadEvent;
+    int nb_process = meetPoint->nb_process;
+    char* sheetID = meetPoint->sheetID;
+    Node* nodes = nodes;
+    int n = meetPoint->n;
+    attributeSt* attributes = meetPoint->attributes;
+    int nb_att = meetPoint->nb_att;
+    int* error = meetPoint->error;
+    ThreadParams* allParams = meetPoint->allParams;
+
+    int rank = threadParamsRank->rank;
+
+    ThreadParams* currentParams = &allParams[rank];
+    int fstSharedDepth = currentParams->fstSharedDepth;
+    int currentLeaf = currentParams->currentLeaf;
+    int* awaitingThrds = currentParams->awaitingThrds;
+    int nb_awaitingThrds = currentParams->nb_awaitingThrds;
+    sharing* result = currentParams->result;
+    sharerResult* sharers = currentParams->sharers;
+
+
     HANDLE hFile;
     OVERLAPPED ov;
 
-    lockFile(&hFile, &ov, sort_info_path);
+    lockFile(&hFile, &ov, threadParamsRank->meetPoint->sort_info_path);
 
     // Open the file for reading
     FILE* file = fopen(sort_info_path, "r");
@@ -620,69 +659,77 @@ int modifyFile(const char* const sort_info_path, char* const sheetID, int n, Thr
         return -1; // JSON parsing error
     }
 
-    cJSON* keyToBufferJS = cJSON_GetObjectItem(json, "keyToBuffer");
-    if (sheetID) {
-        cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(keyToBufferJS, sheetID);
+    cJSON* waitingSheets = cJSON_GetObjectItem(json, "waitingSheets");
+    cJSON* sheetIDToBuffer = cJSON_GetObjectItem(json, "sheetIDToBuffer");
+    if (*sheetID) {
+		int toUpdate = 0;
+        cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
         if (isCompleteSorting) {
-            cJSON* errorJS = cJSON_GetObjectItem(bufferJS, "error");
-            cJSON_ReplaceItemInObject(bufferJS, "error", cJSON_CreateNumber(threadParamsRank->meetPoint->error));
-            cJSON* resultNodesArray = cJSON_GetObjectItem(bufferJS, "resultNodes");
-            for (int j = 0; j < n; j++) {
-                cJSON_ReplaceItemInArray(resultNodesArray, j, cJSON_CreateNumber(((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].result[j].nodeId));
-            }
-        }
-        cJSON* toUpdateJS = cJSON_GetObjectItem(bufferJS, "toUpdate");
-        int toUpdate = toUpdateJS->valueint;
-        if (toUpdate) {
-            if (isCompleteSorting) {
-                int* resultNodes = malloc(n * sizeof(int));
-                for (int j = 0; j < n; j++) {
-                    resultNodes[j] = ((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].result[j].nodeId;
-                }
-                // call VBA
-            }
-            cJSON* updatedJS = cJSON_GetObjectItem(bufferJS, "updatedJS");
-            int updated = updatedJS->valueint;
-            if (updated) {
-                int* resultNodes = malloc(n * sizeof(int));
-                cJSON* resultNodesArray = cJSON_GetObjectItem(bufferJS, "resultNodes");
-                if (resultNodesArray && cJSON_IsArray(resultNodesArray)) {
-                    for (int j = 0; j < n; j++) {
-                        resultNodes[j] = cJSON_GetArrayItem(resultNodesArray, j)->valueint;
+			if (threadParamsRank->meetPoint->error == 0) {
+				cJSON_DeleteItemFromObject(bufferJS, "threads");
+				cJSON_DeleteItemFromObject(bufferJS, "toUpdate");
+				cJSON_DeleteItemFromObject(bufferJS, "updated");
+				int i = 0;
+				cJSON* waitingSheet;
+                cJSON_ArrayForEach(waitingSheet, waitingSheets) {
+                    if (strcmp(waitingSheet->valuestring, sheetID) == 0) {
+						cJSON_DeleteItemFromArray(waitingSheets, i);
+                        break;
                     }
+					i++;
                 }
-                // call VBA
+            }
+            cJSON* toUpdateJS = cJSON_GetObjectItem(bufferJS, "toUpdate");
+            toUpdate = toUpdateJS->valueint;
+            if (toUpdate) {
+                cJSON* sheetPathJS = cJSON_GetObjectItem(bufferJS, "sheetPath");
+                char* sheetPath = sheetPathJS->valuestring;
+                cJSON* sheetPathToSheetID = cJSON_GetObjectItem(json, "sheetPathToSheetID");
+                cJSON* sheetIDJS = cJSON_GetObjectItem(sheetPathToSheetID, sheetPath);
+                if (strcmp(sheetIDJS->valuestring, sheetID) != 0) {
+                    toUpdate = -1;
+                }
+            }
+            if (toUpdate != -1) {
+                cJSON* errorJS = cJSON_GetObjectItem(bufferJS, "error");
+                cJSON_ReplaceItemInObject(bufferJS, "error", cJSON_CreateNumber(threadParamsRank->meetPoint->error));
+                cJSON* resultNodesArray = cJSON_GetObjectItem(bufferJS, "resultNodes");
+                for (int j = 0; j < n; j++) {
+                    cJSON_ReplaceItemInArray(resultNodesArray, j, cJSON_CreateNumber(threadParamsRank->meetPoint->allParams[threadParamsRank->rank].result[j].nodeId));
+                }
+                if (toUpdate) {
+                    // call VBA
+                }
             }
         }
-        else if (isCompleteSorting) {
-            cJSON_ReplaceItemInObject(bufferJS, "updated", cJSON_CreateNumber(0));
-        }
-        cJSON* threadsArray = cJSON_GetObjectItem(bufferJS, "threads");
-        int j = 0;
-        cJSON* thread = cJSON_GetArrayItem(threadsArray, threadParamsRank->rank);
-        cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
-        int k = 0;
-        cJSON* resultElmnt;
-        cJSON_ArrayForEach(resultElmnt, resultJS) {
-            cJSON* resultAtt = cJSON_GetObjectItem(resultElmnt, "result");
-            cJSON* reservationListInd = cJSON_GetObjectItem(resultElmnt, "reservationListInd");
-            if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
-                cJSON_ReplaceItemInObject(resultElmnt, "result", cJSON_CreateNumber(((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].result[k].result.result));
-                cJSON_ReplaceItemInObject(resultElmnt, "reservationListInd", cJSON_CreateNumber(((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].result[k].result.reservationListInd));
+        if (toUpdate != -1) {
+            cJSON* threadsArray = cJSON_GetObjectItem(bufferJS, "threads");
+            int j = 0;
+            cJSON* thread = cJSON_GetArrayItem(threadsArray, threadParamsRank->rank);
+            cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
+            int k = 0;
+            cJSON* resultElmnt;
+            cJSON_ArrayForEach(resultElmnt, resultJS) {
+                cJSON* resultAtt = cJSON_GetObjectItem(resultElmnt, "result");
+                cJSON* reservationListInd = cJSON_GetObjectItem(resultElmnt, "reservationListInd");
+                if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
+                    cJSON_ReplaceItemInObject(resultElmnt, "result", cJSON_CreateNumber(threadParamsRank->meetPoint->allParams[threadParamsRank->rank].result[k].result.result));
+                    cJSON_ReplaceItemInObject(resultElmnt, "reservationListInd", cJSON_CreateNumber(threadParamsRank->meetPoint->allParams[threadParamsRank->rank].result[k].result.reservationListInd));
+                }
+                k++;
             }
-            k++;
-        }
-        cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
-        int k = 0;
-        cJSON* sharer;
-        cJSON_ArrayForEach(sharer, sharersJS) {
-            cJSON* sharerAtt = cJSON_GetObjectItem(sharer, "sharer");
-            cJSON* resultAtt = cJSON_GetObjectItem(sharer, "result");
-            if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
-                cJSON_ReplaceItemInObject(sharer, "sharer", cJSON_CreateNumber(((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].sharers[k].sharer));
-                cJSON_ReplaceItemInObject(sharer, "result", cJSON_CreateNumber(((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].sharers[k].result.result));
+            cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
+            int k = 0;
+            cJSON* sharer;
+            cJSON_ArrayForEach(sharer, sharersJS) {
+                cJSON* sharerAtt = cJSON_GetObjectItem(sharer, "sharer");
+                cJSON* resultAtt = cJSON_GetObjectItem(sharer, "result");
+                if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
+                    cJSON_ReplaceItemInObject(sharer, "sharer", cJSON_CreateNumber(threadParamsRank->meetPoint->allParams[threadParamsRank->rank].sharers[k].sharer));
+                    cJSON_ReplaceItemInObject(sharer, "result", cJSON_CreateNumber(threadParamsRank->meetPoint->allParams[threadParamsRank->rank].sharers[k].result.result));
+                }
+                k++;
             }
-            k++;
         }
     }
 
@@ -690,22 +737,25 @@ int modifyFile(const char* const sort_info_path, char* const sheetID, int n, Thr
 
 	cJSON* nb_processJS = cJSON_GetObjectItem(json, "nb_process");
 	int nb_process = nb_processJS->valueint;
-    if (nb_process < threadParamsRank->meetPoint->threadEvent.size) {
+    if (nb_process < threadParamsRank->meetPoint->nb_process) {
         if (threadParamsRank->rank >= nb_process) {
-            ((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank].fstSharedDepth = -1;
-            if (threadParamsRank->rank == threadParamsRank->meetPoint->threadEvent.size - 1) {
-                for (int i = threadParamsRank->meetPoint->threadEvent.size - 2; i >= nb_process; i--) {
-                    if (((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[i].fstSharedDepth != -1) {
+            threadParamsRank->meetPoint->allParams[threadParamsRank->rank].fstSharedDepth = -1;
+            if (threadParamsRank->rank == threadParamsRank->meetPoint->nb_process - 1) {
+                for (int i = threadParamsRank->meetPoint->nb_process - 2; i >= nb_process; i--) {
+                    if (threadParamsRank->meetPoint->allParams[i].fstSharedDepth != -1) {
                         new_nb_process(threadParamsRank->meetPoint, i);
                         break;
                     }
                 }
             }
+            stopAll = 2;
         }
-    }
+	}
+	else if (nb_process > threadParamsRank->meetPoint->nb_process) {
+		new_nb_process(threadParamsRank->meetPoint, nb_process);
+	}
 
     if (stopAll == 0) {
-        cJSON* waitingSheets = cJSON_GetObjectItem(json, "waitingSheets");
         stopAll = (cJSON_GetArraySize(waitingSheets) == 0);
         if (stopAll == 0) {
             cJSON* waitingSheet = cJSON_GetArrayItem(waitingSheets, 0);
@@ -716,9 +766,9 @@ int modifyFile(const char* const sort_info_path, char* const sheetID, int n, Thr
         }
         if (stopAll) {
             if (*sheetID) {
-                cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(keyToBufferJS, sheetID);
+                cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
                 getNodes(sort_info_path, nodes, attributes, sheetPath, &n, &nb_att);
-                ((ThreadParams*)threadParamsRank->meetPoint->allParams.data)[threadParamsRank->rank]
+				getPrevSort(sort_info_path, allParams, nodes, attributes, nb_process, n, nb_att, sheetPath);
             }
         }
     }
@@ -733,41 +783,227 @@ int modifyFile(const char* const sort_info_path, char* const sheetID, int n, Thr
     return stopAll;
 }
 
+void chooseWithResRules(ThreadParamsRank* threadParamsRank, int depth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending) {
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+    char* sort_info_path = meetPoint->sort_info_path;
+    HANDLE* semaphore = meetPoint->semaphore;
+    ThreadEvent* threadEvent = meetPoint->threadEvent;
+    int nb_process = meetPoint->nb_process;
+    char* sheetID = meetPoint->sheetID;
+    Node* nodes = nodes;
+    int n = meetPoint->n;
+    attributeSt* attributes = meetPoint->attributes;
+    int nb_att = meetPoint->nb_att;
+    int* error = meetPoint->error;
+    ThreadParams* allParams = meetPoint->allParams;
+
+    int rank = threadParamsRank->rank;
+
+    ThreadParams* currentParams = &allParams[rank];
+    int fstSharedDepth = currentParams->fstSharedDepth;
+    int currentLeaf = currentParams->currentLeaf;
+    int* awaitingThrds = currentParams->awaitingThrds;
+    int nb_awaitingThrds = currentParams->nb_awaitingThrds;
+    sharing* result = currentParams->result;
+    sharerResult* sharers = currentParams->sharers;
+
+
+    int placeInd;
+    int choiceInd;
+    if (result[depth].result.result == -1) {
+        placeInd = reservationRules[depth].resList;
+        choiceInd = 0;
+    }
+    else {
+        placeInd = result[depth].result.reservationListInd;
+        choiceInd = result[depth].result.result + 1;
+    }
+    result[depth].result.result = -1;
+    int found = 0;
+    do {
+        for (int i = choiceInd; i < reservationLists[placeInd].data.size; i++) {
+            result[depth].nodeId = ((int*)reservationLists[placeInd].data.data)[i];
+            if (busyNodes[result[depth].nodeId] == 0 && check_conditions(nodes, n, result, depth)) {
+                result[depth].result.reservationListInd = placeInd;
+                result[depth].result.result = i;
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            if (!reservationRules[depth].all) {
+                break;
+            }
+            choiceInd = 0;
+            placeInd = reservationLists[placeInd].nextListInd;
+        }
+    } while (!found && placeInd != -1);
+    if (!found) {
+        ascending = 0;
+    }
+}
+
+void updateErrors(int* errors) {
+
+}
+
+void chooseNextOpt(ThreadParamsRank* threadParamsRank, int depth, int lastSharedDepth, HANDLE semaphore, ReservationRule* reservationRules, ReservationList* reservationLists, GenericList* const rests, int* ascending, int* busyNodes) {
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+    char* sort_info_path = meetPoint->sort_info_path;
+    HANDLE* semaphore = meetPoint->semaphore;
+    ThreadEvent* threadEvent = meetPoint->threadEvent;
+    int nb_process = meetPoint->nb_process;
+    char* sheetID = meetPoint->sheetID;
+    Node* nodes = nodes;
+    int n = meetPoint->n;
+    attributeSt* attributes = meetPoint->attributes;
+    int nb_att = meetPoint->nb_att;
+    int* error = meetPoint->error;
+    ThreadParams* allParams = meetPoint->allParams;
+
+    int rank = threadParamsRank->rank;
+
+    ThreadParams* currentParams = &allParams[rank];
+    int fstSharedDepth = currentParams->fstSharedDepth;
+    int currentLeaf = currentParams->currentLeaf;
+    int* awaitingThrds = currentParams->awaitingThrds;
+    int nb_awaitingThrds = currentParams->nb_awaitingThrds;
+    sharing* result = currentParams->result;
+    sharerResult* sharers = currentParams->sharers;
+
+
+    // if the tree is shared with another thread at this depth
+    if (depth == lastSharedDepth) {
+        WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
+        result[depth].result = sharers[depth].result;
+    }
+
+    if (reservationRules[depth].resList == -1) {
+        do {
+            if (result[depth].result.result == rests[depth].size) {
+                ascending = 0;
+                break;
+            }
+            result[depth].result.result++;
+            result[depth].nodeId = ((int*)rests[depth].data)[result[depth].result.result];
+            if (check_conditions(nodes, n, result, depth)) {
+                break;
+            }
+        } while (1);
+    }
+    else {
+		chooseWithResRules(threadParamsRank, depth, reservationLists, reservationRules, busyNodes, ascending);
+    }
+
+	updateErrors(error);
+
+    // if the tree is shared with another thread at this depth
+    if (depth == lastSharedDepth) {
+        allParams[sharers[depth].sharer].sharers[depth].result = result[depth].result;
+        ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+    }
+}
+
+int updateThread(ThreadParamsRank* threadParamsRank, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, int nbItBefUpdErr, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending) {
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+	HANDLE* semaphore = meetPoint->semaphore;
+    ThreadParams* allParams = meetPoint->allParams;
+	int rank = threadParamsRank->rank;
+    ThreadParams* currentParams = &allParams[rank];
+    int nb_awaitingThrds = currentParams->nb_awaitingThrds;
+    sharing* result = currentParams->result;
+	sharerResult* sharers = currentParams->sharers;
+
+
+    (*befUpdErr)--;
+    if (*befUpdErr == 0) {
+        WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
+        *errorThrd = meetPoint->error;
+		int stopAll = modifyFile(threadParamsRank, *depth, reservationLists, reservationRules, busyNodes, ascending, 0);
+        if (stopAll) {
+            if (stopAll == 2) {
+                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+                return 1;
+            }
+            *depth = 0;
+        }
+        if (nb_awaitingThrds > 0 && *lastSharedDepth < meetPoint->n - 2) {
+            int otherRank = currentParams->awaitingThrds[nb_awaitingThrds];
+			removeInd(currentParams->awaitingThrds, nb_awaitingThrds, nb_awaitingThrds - 1, sizeof(int));
+            ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+            (*lastSharedDepth)++;
+            ThreadParams* otherParams;
+            otherParams = &allParams[otherRank];
+            otherParams->fstSharedDepth = *lastSharedDepth;
+            for (int i = 0; i <= *lastSharedDepth; i++) {
+                otherParams->result[i].result = result[i].result;
+            }
+            otherParams->sharers[*lastSharedDepth].sharer = rank;
+            otherParams->sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
+            sharers[*lastSharedDepth].sharer = otherRank;
+            sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
+            SetEvent(meetPoint->threadEvent[otherRank].eventHandlesThd);
+        }
+        else {
+            ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+        }
+        *befUpdErr = nbItBefUpdErr;
+    }
+	return 0;
+}
+
 // Recursive function to try all possible ways to sort the integer
 DWORD WINAPI threadSort(LPVOID lpParam) {
     const int fstNbItBefUpdErr = 50;
     const int nbItBefUpdErr = 10000;
 
-    // Cast lpParam to the appropriate structure type
-    ThreadParamsRank* threadParamsRank = (ThreadParamsRank*)lpParam;
-	const char* const sort_info_path = threadParamsRank->allParams->sort_info_path;
-	int rank = threadParamsRank->rank;
-	ThreadParams* allParams = threadParamsRank->allParams;
-	ThreadParams* params = &allParams[rank];
-	HANDLE* eventHandlesThd = params->eventHandlesThd;
-	HANDLE semaphore = *params->semaphore;
-	const char* const sheetPath = params->sheetPath;
-	const Node* const nodes = params->nodes;
-	const int n = params->n;
-	int fstSharedDepth = params->fstSharedDepth;
-	int currentLeaf = params->currentLeaf;
-	int* const error = params->error;
-    int errorThrd = params->errorThrd;
-    GenericList* const awaitingThrds = params->awaitingThrds;
-	int* const reservationListsResult = params->reservationListsResult;
-	int* const reservationListsElemResult = params->reservationListsElemResult;
-	sharing* const result = params->result;
-    sharerResult* const sharers = params->sharers;
-	int restoreUpTo = params->restoreUpTo;
 
-	int lastSharedDepth = fstSharedDepth;
-	int ascending = 0;
+    // Cast lpParam to the appropriate structure type
+    /*ThreadParamsRank* threadParamsRank = (ThreadParamsRank*)lpParam;
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+    char* sort_info_path = meetPoint->sort_info_path;
+    HANDLE* semaphore = meetPoint->semaphore;
+    ThreadEvent* threadEvent = meetPoint->threadEvent;
+    int nb_process = meetPoint->nb_process;
+    char* sheetID = meetPoint->sheetID;
+    Node* nodes = nodes;
+    int n = meetPoint->n;
+    attributeSt* attributes = meetPoint->attributes;
+    int nb_att = meetPoint->nb_att;
+    int* error = meetPoint->error;
+    ThreadParams* allParams = meetPoint->allParams;
+
+    int rank = threadParamsRank->rank;
+
+    ThreadParams* currentParams = &allParams[rank];
+    int fstSharedDepth = currentParams->fstSharedDepth;
+    int currentLeaf = currentParams->currentLeaf;
+    int* awaitingThrds = currentParams->awaitingThrds;
+    int nb_awaitingThrds = currentParams->nb_awaitingThrds;
+    sharing* result = currentParams->result;
+    sharerResult* sharers = currentParams->sharers;*/
+
+
+    ThreadParamsRank* threadParamsRank = (ThreadParamsRank*)lpParam;
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+	HANDLE* semaphore = meetPoint->semaphore;
+	Node* nodes = nodes;
+	int n = meetPoint->n;
+    int* error = &meetPoint->error;
+    ThreadParams* allParams = meetPoint->allParams;
+    int rank = threadParamsRank->rank;
+    ThreadParams* currentParams = &allParams[rank];
+
+
+	int lastSharedDepth = currentParams->fstSharedDepth;
+	int ascending = 1;
     int found = 0;
     int currentElement;
 	int befUpdErr = fstNbItBefUpdErr;
     int startInd = 0;
     int depth = 0;
     int nodId;
+    int errorThrd;
 	int* resultNodes = malloc(n * sizeof(int));
 	int* const busyNodes = malloc(n * sizeof(int));
 	GenericList* const rests = malloc(n * sizeof(GenericList));
@@ -783,22 +1019,23 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         reservationRules[i].resList = -1;
     }
     for (int i = 0; i < n; i++) {
-        for (int j = 0; j < nodes[i].allowedPlaces.size; i++) {
-            if (((allowedPlaceSt*)nodes[i].allowedPlaces.data)[j].start != 0) {
-                addElement(&startExcl[((allowedPlaceSt*)nodes[i].allowedPlaces.data)[j].start], i);
+		Node* node = &nodes[i];
+        for (int j = 0; j < node->nb_allowedPlaces; i++) {
+            if (node->allowedPlaces[j].start != 0) {
+                addElement(&startExcl[node->allowedPlaces[j].start], i);
 			}
 			else if (j == 0) {
 				busyNodes[i]++;
 			}
-            addElement(&endExcl[((allowedPlaceSt*)nodes[i].allowedPlaces.data)[j].end], i);
+            addElement(&endExcl[node->allowedPlaces[j].end], i);
         }
-        if (busyNodes[i] == 0 && check_conditions(nodes, n, result, depth)) {
+        if (busyNodes[i] == 0 && check_conditions(nodes, n, currentParams->result, depth)) {
 			addElement(&(rests[0]), &i);
         }
     }
     for (int i = 0; i < n - 1; i++) {
         initList(&(reservationLists[i].data), sizeof(int), 1);
-        notChosenAnymore(nodes, n, i, reservationRules, reservationLists, startExcl, endExcl);
+        notChosenAnymore(&nodes[i], n, i, reservationRules, reservationLists, startExcl, endExcl);
     }
 	int searchingRoot = 0;
 	int* neighborRanks = malloc(n * sizeof(int));
@@ -806,83 +1043,27 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	// all the threads except the first one get in a state of waiting for the first to share.
     if (rank != 0) {
         if (reservationRules[0].resList == -1) {
-            result[0].result.result = rests[depth].size;
+            currentParams->result[0].result.result = rests[depth].size;
         }
 		else {
 			int placeInd = reservationRules[depth].resList;
             while (placeInd != -1) {
                 placeInd = reservationLists[placeInd].nextListInd;
             }
-            result[depth].result.result = reservationLists[placeInd].data.size;
-			result[depth].result.reservationListInd = placeInd;
+            currentParams->result[depth].result.result = reservationLists[placeInd].data.size;
+            currentParams->result[depth].result.reservationListInd = placeInd;
 		}
     }
 
+	if (updateThread(threadParamsRank, &befUpdErr, &errorThrd, &depth, &lastSharedDepth, nbItBefUpdErr)) {
+		return;
+    }
     // main loop
     while (1) {
-
-        // if the tree is shared with another thread at this depth
-        if (depth == lastSharedDepth) {
-            WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-			result[depth].result = sharers[depth].result;
-        }
-
-        if (reservationRules[depth].resList == -1) {
-            do {
-                if (result[depth].result.result == rests[depth].size) {
-                    ascending = 0;
-                    break;
-                }
-                result[depth].result.result++;
-                result[depth].nodeId = ((int*)rests[depth].data)[result[depth].result.result];
-                if (check_conditions(nodes, n, result, depth)) {
-                    break;
-                }
-            } while (1);
-        }
-        else {
-            int placeInd;
-            int choiceInd;
-            if (result[depth].result.result == -1) {
-                placeInd = reservationRules[depth].resList;
-                choiceInd = 0;
-            }
-            else {
-                placeInd = result[depth].result.reservationListInd;
-                choiceInd = result[depth].result.result + 1;
-            }
-            result[depth].result.result = -1;
-            found = 0;
-            do {
-                for (int i = choiceInd; i < reservationLists[placeInd].data.size; i++) {
-                    result[depth].nodeId = ((int*)reservationLists[placeInd].data.data)[i];
-                    if (busyNodes[result[depth].nodeId] == 0 && check_conditions(nodes, n, resultNodes, depth)) {
-                        result[depth].result.reservationListInd = placeInd;
-                        result[depth].result.result = i;
-                        found = 1;
-                        break;
-                    }
-                }
-                if (!found) {
-                    if (!reservationRules[depth].all) {
-                        break;
-                    }
-                    choiceInd = 0;
-                    placeInd = reservationLists[placeInd].nextListInd;
-                }
-            } while (!found && placeInd != -1);
-            if (!found) {
-                ascending = 0;
-            }
-        }
-
-        // if the tree is shared with another thread at this depth
-        if (depth == lastSharedDepth) {
-            allParams[sharers[depth].sharer].sharers[depth].result = result[depth].result;
-            ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-        }
+		chooseNextOpt(threadParamsRank, depth, lastSharedDepth, semaphore, reservationRules, reservationLists, rests, &ascending, busyNodes);
 
         if (ascending == 1) {
+            depth++;
             if (depth == n) {
 				errorThrd = errors[n - 1];
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
@@ -892,8 +1073,12 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 else {
 					errorThrd = *error;
                 }
-				int stopAll = modifyFile(sort_info_path, sheetPath, n, threadParamsRank, errorThrd < *error);
+				int stopAll = modifyFile(threadParamsRank, depth, reservationLists, reservationRules, busyNodes, ascending, errorThrd);
 				if (stopAll) {
+					if (stopAll == 2) {
+						ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+                        return;
+					}
                     depth = 0;
 				}
                 ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
@@ -901,8 +1086,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 				ascending = 0;
             }
             else {
-                depth++;
-                nodId = result[depth - 1].nodeId;
+                nodId = currentParams->result[depth - 1].nodeId;
 
                 // ********* update the remaining elements *********
 
@@ -918,7 +1102,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                 busyNodes[nodId]++;
 
                 // update the reservation rules
-                if (nodes[nodId].allowedPlaces.size) {
+                if (nodes[nodId].nb_allowedPlaces) {
 					int highest = ((allowedPlaceSt*)getLastElement(&nodes[nodId].allowedPlaces))->end;
                     int placeInd = highest;
                     int placeIndPrev;
@@ -951,8 +1135,8 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
                     }
                     removeElement(&(reservationLists[highest].data), nodId);
                 }
-                for (int j = 0; j < nodes[nodId].ulteriors.size; j++) {
-                    int element = ((int*)nodes[nodId].ulteriors.data)[j];
+                for (int j = 0; j < nodes[nodId].nb_ulteriors; j++) {
+                    int element = nodes[nodId].ulteriors[j];
 					busyNodes[element]--;
                     if (busyNodes[element] == 0) {
                         addElement(&(rests[depth]), &element);
@@ -980,107 +1164,60 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         }
         if (ascending == 0) {
 			ascending = 1;
-			result[depth].result.result = -1;
+            currentParams->result[depth].result.result = -1;
 			depth--;
-            if (depth == fstSharedDepth) {
+            if (depth == currentParams->fstSharedDepth) {
                 WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
                 errorThrd = *error;
-                addElement(awaitingThrds, &rank);
+                addElement(currentParams->awaitingThrds, &rank);
                 ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                WaitForSingleObject(eventHandlesThd[rank], INFINITE);
+                WaitForSingleObject(meetPoint->threadEvent[rank].eventHandlesThd, INFINITE);
             }
-			befUpdErr--;
-			if (befUpdErr == 0) {
-                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-                errorThrd = *error;
-				int stopAll = modifyFile(sort_info_path, sheetPath, n, threadParamsRank, 0);
-                if (stopAll) {
-                    depth = 0;
-                }
-                if (awaitingThrds->size > 0 && lastSharedDepth < n - 2) {
-					int otherRank = ((int*)awaitingThrds->data)[awaitingThrds->size];
-                    removeInd(awaitingThrds, awaitingThrds->size - 1);
-                    ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                    lastSharedDepth++;
-                    ThreadParams* otherParams;
-					otherParams = &allParams[otherRank];
-					otherParams->fstSharedDepth = lastSharedDepth;
-                    for (int i = 0; i <= lastSharedDepth; i++) {
-                        otherParams->result[i].result = result[i].result;
-                    }
-                    otherParams->sharers[lastSharedDepth].sharer = rank;
-                    otherParams->sharers[lastSharedDepth].result = result[lastSharedDepth].result;
-					sharers[lastSharedDepth].sharer = otherRank;
-                    sharers[lastSharedDepth].result = result[lastSharedDepth].result;
-					SetEvent(eventHandlesThd[otherRank]);
-                }
-                else {
-					ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                }
-				befUpdErr = nbItBefUpdErr;
+			if (updateThread(threadParamsRank, &befUpdErr, &errorThrd, &depth, &lastSharedDepth, nbItBefUpdErr)) {
+                return;
+            }
+			if (reservationListsResult[depth - 1] == -1) {
+                nodId = currentParams->rests[depth - 1][currentParams->result[depth - 1]];
 			}
-            if (depth == startDepthThrd) {
-                if (nbLeaves!=0) {
-                    int restLeaves2 = nbLeaves % nb_process;
-                    if (restLeaves2 <= restLeaves) {
-                        if (nbLeaves > nbLeavesMin && restLeaves2 <= repartTol * nb_process) {
-                            return 0;
-                        }
-                        *startsSize = nbLeaves;
-                        *end = endI;
-                        if (restLeaves2 == 0) {
-                            return 0;
-                        }
-                        restLeaves = restLeaves2;
-                    }
-                    nbLeaves = 0;
-                    if (endI == n) {
-                        return 0;
-                    }
-                    endI++;
-                }
-                result[0] = restsSizes[0];
-            } 
-            else {
-				if (reservationListsResult[depth - 1] == -1) {
-                    nodId = rests[depth - 1][result[depth - 1]];
-				}
-				else {
-                    nodId = ((int*)reservationLists[reservationListsResult[depth - 1]].data.data)[reservationListsElemResult[depth - 1]];
-				}
-                nodes[nodId].nbPost--;
-                notChosenAnymore(nodes, n, nodId, reservationRules, reservationLists);
-                for (int j = 0; j < nodes[nodId].ulteriors.size; j++) {
-                    int ulterior = ((int*)nodes[nodId].ulteriors.data)[j];
-                    nodes[ulterior].nbPost++;
-                }
-
-                // what being at this depth implies
-                for (int i = 0; i < startExcl[depth].size; i++) {
-                    nodes[((int*)startExcl[depth].data)[i]].nbPost--;
-                }
-                for (int i = 0; i < endExcl[depth].size; i++) {
-                    nodes[((int*)endExcl[depth].data)[i]].nbPost++;
-                }
-                depth--;
+			else {
+                nodId = ((int*)reservationLists[reservationListsResult[depth - 1]].data.data)[reservationListsElemResult[depth - 1]];
+			}
+            nodes[nodId].nbPost--;
+            notChosenAnymore();
+            for (int j = 0; j < nodes[nodId].ulteriors.size; j++) {
+                int ulterior = ((int*)nodes[nodId].ulteriors.data)[j];
+                nodes[ulterior].nbPost++;
             }
+
+            // what being at this depth implies
+            for (int i = 0; i < startExcl[depth].size; i++) {
+                nodes[((int*)startExcl[depth].data)[i]].nbPost--;
+            }
+            for (int i = 0; i < endExcl[depth].size; i++) {
+                nodes[((int*)endExcl[depth].data)[i]].nbPost++;
+            }
+            depth--;
         }
     }
 }
 
 void new_nb_process(MeetPoint* meetPoint, int nb_process) {
-	for (int i = meetPoint->threadEvent.size; i < nb_process; i++) {
+	for (int i = meetPoint->nb_process; i < nb_process; i++) {
+		meetPoint->allParams = realloc(meetPoint->allParams, (i + 1) * sizeof(ThreadParams));
+		meetPoint->allParams[i].fstSharedDepth = 0;
+		meetPoint->threadEvent = realloc(meetPoint->threadEvent, (i + 1) * sizeof(ThreadEvent));
         ThreadEvent threadEvent = {
 			.eventHandlesThd = CreateEvent(NULL, FALSE, FALSE, NULL),
-			.hThread = CreateThread(NULL, 0, threadSort, &((ThreadParams*)meetPoint->allParams.data)[i], 0, NULL)
+			.hThread = CreateThread(NULL, 0, threadSort, &meetPoint->allParams[i], 0, NULL)
 		};
-		addElement(&(meetPoint->threadEvent), &threadEvent);
+		meetPoint->threadEvent[i] = threadEvent;
 	}
-	for (int i = nb_process; i < meetPoint->threadEvent.size; i++) {
-		CloseHandle(((ThreadEvent*)meetPoint->threadEvent.data)[i].hThread);
-		CloseHandle(((ThreadEvent*)meetPoint->threadEvent.data)[i].eventHandlesThd);
+	for (int i = nb_process; i < meetPoint->nb_process; i++) {
+		CloseHandle(meetPoint->threadEvent[i].hThread);
+		CloseHandle(meetPoint->threadEvent[i].eventHandlesThd);
+        meetPoint->threadEvent = realloc(meetPoint->threadEvent, (i + 1) * sizeof(ThreadEvent));
 	}
-	meetPoint->threadEvent.size = nb_process;
+	meetPoint->nb_process = nb_process;
 }
 
 int main(int argc, char* argv[]) {
@@ -1090,23 +1227,37 @@ int main(int argc, char* argv[]) {
     MeetPoint meetPoint = {
 		.sort_info_path = sort_info_path,
 		.semaphore = CreateSemaphore(NULL, 1, 1, NULL),
+        .threadEvent = NULL,
+		.nb_process = 0,
 		.sheetID = NULL,
+		.nodes = NULL,
+		.n = 0,
+		.attributes = NULL,
+		.nb_att = 0,
 		.error = INT_MAX,
+		.allParams = NULL
     };
-	initList(&(meetPoint.threadEvent), sizeof(ThreadEvent), 1);
-	initList(&(meetPoint.nodes), sizeof(Node), 1);
-	initList(&(meetPoint.attributes), sizeof(attributeSt), 1);
-	initList(&(meetPoint.allParams), sizeof(ThreadParams), 1);
     ThreadParamsRank allParamsRank = {
         .meetPoint = &meetPoint,
-        .rank = meetPoint.threadEvent.size
+        .rank = 0
     };
 
 	// Create a new thread
 	new_nb_process(&meetPoint, 1);
 
-	// Wait for one thread to finish
-	WaitForSingleObject(((ThreadEvent*)meetPoint.threadEvent.data)[0].hThread, INFINITE);
+	// Wait for all threads to finish
+    int p;
+    while (meetPoint.nb_process) {
+        WaitForSingleObject(meetPoint.semaphore, INFINITE);
+		for (int i = 0; i < meetPoint.nb_process; i++) {
+			if (meetPoint.allParams[i].fstSharedDepth != -1) {
+				p = i;
+				break;
+			}
+		}
+		ReleaseSemaphore(meetPoint.semaphore, 1, NULL);
+        WaitForSingleObject(meetPoint.threadEvent[p].hThread, INFINITE);
+    }
 
 	// Close thread handle
 	new_nb_process(&meetPoint, 0);
