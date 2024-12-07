@@ -620,6 +620,7 @@ inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting
     cJSON* waitingSheets = cJSON_GetObjectItem(json, "waitingSheets");
     cJSON* sheetIDToBuffer = cJSON_GetObjectItem(json, "sheetIDToBuffer");
     if (*sheetID) {
+        updateBefUpd(errorThrd, error, initBefUpdErr, errors, n, isCompleteSorting, semaphore, befUpdErr);
 		updateThrdAchiev(sheetIDToBuffer, sheetID, isCompleteSorting, error, waitingSheets, json, allParams, rank, n);
     }
 
@@ -742,11 +743,11 @@ inline void chooseNextOpt(HANDLE semaphore, int* befUpdErr, int* errorThrd, int*
     }
 }
 
-inline int updateBefUpd() {
+inline int updateBefUpd(int* errorThrd, int* error, int* initBefUpdErr, int* errors, int n, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr) {
     const int incremBefUpdErr = 50;
 
 
-    if (errorThrd != *error) {
+    if (*errorThrd != *error) {
         initBefUpdErr += incremBefUpdErr;
 	}
 	else {
@@ -769,7 +770,6 @@ inline int updateBefUpd() {
 
 inline int updateThread(int* befUpdErr, HANDLE semaphore, int* errors, int* error, int* depth, int* nb_awaitingThrds, int* lastSharedDepth, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, ThreadEvent* threadEvents, int nbItBefUpdErr, int isCompleteSorting) {
     WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-	updateBefUpd();
     int stopAll;
     modifyFile();
     if (stopAll) {
@@ -917,7 +917,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
     GenericList* const startExcl = NULL;
     GenericList* const endExcl = NULL;
     int* const errors = NULL;
-
+    int errorThrd;
 
 	if (updateThread()) {
 		return;
