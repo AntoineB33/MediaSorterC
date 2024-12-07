@@ -80,6 +80,17 @@ typedef struct {
 } attributeSt;
 
 typedef struct {
+    char* sheetID;
+    Node* nodes;
+    int n;
+    attributeSt* attributes;
+    int nb_att;
+    int error;
+    int nb_process_on_it;
+} problemSt;
+
+typedef struct {
+	problemSt* problem;
 	int fstSharedDepth;
     sharing* result;
     sharerResult* sharers;
@@ -92,18 +103,17 @@ typedef struct {
 
 typedef struct {
     const char* sort_info_path;
+    problemSt** allProblems;
+	int nb_allProblems;
+	HANDLE* mainSemaphore;
     HANDLE* semaphore;
     ThreadEvent* threadEvents;
 	int nb_process;
-    char* sheetID;
-    Node* nodes;
-    int n;
-    attributeSt* attributes;
-    int nb_att;
-    int error;
     ThreadParams* allParams;
+    int nb_params;
     int* awaitingThrds;
     int nb_awaitingThrds;
+	int* activeThrd;
 } MeetPoint;
 
 typedef struct {
@@ -218,7 +228,7 @@ void freeNodes(Node* nodes, size_t nodeCount) {
     free(nodes);
 }
 
-inline void notChosenAnymore(HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, int nbItBefUpdErr, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node* nodes, const char* const sort_info_path, Node* node, int nodeId) {
+inline void notChosenAnymore(Node* node, ReservationRule* reservationRules, ReservationList* reservationLists, int nodeId) {
     if (node->nb_allowedPlaces) {
         int highest = node->allowedPlaces[node->nb_allowedPlaces - 1].end;
         int resListInd = reservationRules[highest].resList;
@@ -309,7 +319,7 @@ inline void unlockFile(HANDLE* hFile, OVERLAPPED* ov) {
 	CloseHandle(*hFile);
 }
 
-inline int getNodes(HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, int nbItBefUpdErr, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node* nodes, const char* const sort_info_path) {
+inline int getNodes(char* sheetPath, int* n, Node* nodes, attributeSt* attributes) {
 	const char* infoFolder = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/info";
 
 
@@ -335,44 +345,47 @@ inline int getNodes(HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth
         return -1;
     }
 
+
     cJSON* nodesArray = cJSON_GetObjectItem(json, "nodes");
     *n = cJSON_GetArraySize(nodesArray);
 	nodes = malloc(*n * sizeof(Node));
-    if (nodesArray && cJSON_IsArray(nodesArray)) {
-        int i = 0;
-        cJSON* node;
-        cJSON_ArrayForEach(node, nodesArray) {
-
-			cJSON* ulteriorsArray = cJSON_GetObjectItem(node, "ulteriors");
-			int ulteriorsSize = cJSON_GetArraySize(ulteriorsArray);
-			initList(&(nodes[i].ulteriors), sizeof(int), ulteriorsSize);
-            for (int j = 0; j < ulteriorsSize; j++) {
-                int ulterior = cJSON_GetArrayItem(ulteriorsArray, j)->valueint;
-                addElement(&(nodes[i].ulteriors), &ulterior);
-            }
-
-			cJSON* conditionsArray = cJSON_GetObjectItem(node, "conditions");
-			int conditionsSize = cJSON_GetArraySize(conditionsArray);
-			initList(&(nodes[i].conditions), sizeof(char*), conditionsSize);
-			for (int j = 0; j < conditionsSize; j++) {
-				const char* condition = cJSON_GetArrayItem(conditionsArray, j)->valuestring;
-				addElement(&(nodes[i].conditions), &condition);
-			}
-
-			cJSON* allowedPlacesArray = cJSON_GetObjectItem(node, "allowedPlaces");
-			int allowedPlacesSize = cJSON_GetArraySize(allowedPlacesArray);
-			initList(&(nodes[i].allowedPlaces), sizeof(allowedPlaceSt), allowedPlacesSize);
-			for (int j = 0; j < allowedPlacesSize; j++) {
-				cJSON* allowedPlace = cJSON_GetArrayItem(allowedPlacesArray, j);
-				allowedPlaceSt allowedPlaceSt;
-				allowedPlaceSt.start = cJSON_GetObjectItem(allowedPlace, "start")->valueint;
-				allowedPlaceSt.end = cJSON_GetObjectItem(allowedPlace, "end")->valueint;
-				addElement(&(nodes[i].allowedPlaces), &allowedPlaceSt);
-			}
-
-			nodes[i].nbPost = cJSON_GetObjectItem(node, "nbPost")->valueint;
-			i++;
-        }
+    int i = 0;
+    cJSON* node;
+    cJSON_ArrayForEach(node, nodesArray) {
+		cJSON* ulteriorsArray = cJSON_GetObjectItem(node, "ulteriors");
+        nodes[i].nb_ulteriors = cJSON_GetArraySize(ulteriorsArray);
+        nodes[i].ulteriors = malloc(nodes[i].nb_ulteriors * sizeof(int));
+		cJSON* cJSONEl;
+		cJSON_ArrayForEach(cJSONEl, ulteriorsArray) {
+			nodes[i].ulteriors[i] = cJSONEl->valueint;
+		}
+		cJSON* conditionsArray = cJSON_GetObjectItem(node, "conditions");
+        nodes[i].nb_conditions = cJSON_GetArraySize(conditionsArray);
+		nodes[i].conditions = malloc(nodes[i].nb_conditions * sizeof(char*));
+		cJSON_ArrayForEach(cJSONEl, conditionsArray) {
+			nodes[i].conditions[i] = cJSONEl->valuestring;
+		}
+		cJSON* groupsArray = cJSON_GetObjectItem(node, "groups");
+		nodes[i].nb_groups = cJSON_GetArraySize(groupsArray);
+		nodes[i].groups = malloc(nodes[i].nb_groups * sizeof(Node*));
+		cJSON_ArrayForEach(cJSONEl, groupsArray) {
+			nodes[i].groups[i] = nodes + cJSONEl->valueint;
+		}
+		cJSON* allowedPlacesArray = cJSON_GetObjectItem(node, "allowedPlaces");
+		nodes[i].nb_allowedPlaces = cJSON_GetArraySize(allowedPlacesArray);
+		nodes[i].allowedPlaces = malloc(nodes[i].nb_allowedPlaces * sizeof(allowedPlaceSt));
+		cJSON_ArrayForEach(cJSONEl, allowedPlacesArray) {
+			nodes[i].allowedPlaces[i].start = cJSON_GetObjectItem(cJSONEl, "start")->valueint;
+			nodes[i].allowedPlaces[i].end = cJSON_GetObjectItem(cJSONEl, "end")->valueint;
+		}
+		cJSON* errorFunctionsArray = cJSON_GetObjectItem(node, "errorFunctions");
+		nodes[i].nb_errorFunctions = cJSON_GetArraySize(errorFunctionsArray);
+		nodes[i].errorFunctions = malloc(nodes[i].nb_errorFunctions * sizeof(char*));
+		cJSON_ArrayForEach(cJSONEl, errorFunctionsArray) {
+			nodes[i].errorFunctions[i] = cJSONEl->valuestring;
+		}
+		nodes[i].nbPost = cJSON_GetObjectItem(node, "nbPost")->valueint;
+		i++;
     }
 
 	cJSON* attributesArray = cJSON_GetObjectItem(json, "attributes");
@@ -387,181 +400,54 @@ inline int getNodes(HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth
 		}
 	}
 
-    // Cleanup
-    cJSON_Delete(json);
-    free(fileContent);
-
-    fclose(file);
-
-    unlockFile(&hFile, &ov);
+	cleanFile(&hFile, &ov, file, fileContent, json);
+	return 0;
 }
 
-inline void getPrevSort(HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, int nbItBefUpdErr, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node* nodes, const char* const sort_info_path) {
+inline void getPrevSort(char* sort_info_path, cJSON* sheetIDToBuffer, char* sheetID, ThreadParams* allParams) {
     HANDLE hFile;
     OVERLAPPED ov;
-
-    lockFile(&hFile, &ov, sort_info_path);
-
-    // Open the file for reading
-    FILE* file = fopen(sort_info_path, "r");
-    if (!file) {
-        printf("Failed to open file for reading: %s\n", sort_info_path);
-        unlockFile(&hFile, &ov);
-        free(sort_info_path);
+    FILE* file;
+    char* fileContent;
+    cJSON* json;
+    if (openTxtFile(&hFile, &ov, file, fileContent, json, sort_info_path)) {
         return -1;
     }
 
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    size_t fileSize = ftell(file);
-    rewind(file);
-
-    // Read file content into a buffer
-    char* fileContent = (char*)malloc(fileSize + 1);
-    if (!fileContent) {
-        printf("Failed to allocate memory for file content.\n");
-        fclose(file);
-        unlockFile(&hFile, &ov);
-        free(sort_info_path);
-        return -1; // Memory allocation error
-    }
-    fread(fileContent, 1, fileSize, file);
-    fileContent[fileSize] = '\0'; // Null-terminate the JSON string
-    fclose(file);
-
-
-    // Parse JSON content
-    cJSON* json = cJSON_Parse(fileContent);
-    if (!json) {
-        printf("Failed to parse JSON: %s\n", cJSON_GetErrorPtr());
-        free(fileContent);
-        free(sort_info_path);
-        return -1; // JSON parsing error
-    }
-
-    HANDLE* eventHandlesThd = malloc(*nb_process * sizeof(HANDLE));
-	for (int i = 0; i < *nb_process; i++) {
-		eventHandlesThd[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
-	}
-    HANDLE semaphore;
-    int error = INT_MAX;
-    int nbAwaitingThrd = 0;
-    GenericList* awaitingThrds;
-    initList(awaitingThrds, sizeof(int), 1);
-	cJSON* sheetsArray = cJSON_GetObjectItem(json, "sheets");
-    if (sheetsArray && cJSON_IsArray(sheetsArray)) {
-        int i = 0;
-        cJSON* sheet;
-        cJSON_ArrayForEach(sheet, sheetsArray) {
-            cJSON* sheetName = cJSON_GetObjectItem(sheet, "sheetName");
-            if (sheetName && cJSON_IsString(sheetName) && strcmp(sheetName->valuestring, sheetPath) != 0) {
-                continue;
-            }
-            cJSON* threadsArray = cJSON_GetObjectItem(sheet, "threads");
-            if (threadsArray && cJSON_IsArray(threadsArray)) {
-				int threadsArraySize = cJSON_GetArraySize(threadsArray);
-				initList(allParams, sizeof(ThreadParams), max(*nb_process, threadsArraySize));
-                int j = 0;
-                cJSON* thread;
-                cJSON_ArrayForEach(thread, threadsArray) {
-                    int* reservationListsResult = malloc(n * sizeof(int));
-                    int* reservationListsElemResult = malloc(n * sizeof(int));
-                    sharing* result = malloc(n * sizeof(sharing));
-                    sharerResult* sharers = malloc(n * sizeof(int));
-					cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
-                    int k = 0;
-                    cJSON* resultElmnt;
-                    if (cJSON_IsArray(resultJS)) {
-                        cJSON_ArrayForEach(resultElmnt, resultJS) {
-                            cJSON* resultAtt = cJSON_GetObjectItem(thread, "result");
-                            cJSON* reservationListInd = cJSON_GetObjectItem(thread, "reservationListInd");
-                            if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
-								result[k].result.result = resultAtt->valueint;
-								result[k].result.reservationListInd = reservationListInd->valueint;
-                            }
-                            k++;
-                        }
-                    }
-                    for (int m = k; m < n; m++) {
-                        result[m].result.result = -1;
-                    }
-					cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
-					k = 0;
-					cJSON* sharer;
-					if (cJSON_IsArray(sharersJS)) {
-						cJSON_ArrayForEach(sharer, sharersJS) {
-							cJSON* sharerAtt = cJSON_GetObjectItem(thread, "sharer");
-							cJSON* resultAtt = cJSON_GetObjectItem(thread, "result");
-							if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
-								sharers[k].sharer = sharerAtt->valueint;
-								sharers[k].result.result = resultAtt->valueint;
-							}
-							k++;
-						}
-					}
-                    ThreadParams params = {
-                        .sort_info_path = sort_info_path,
-                        .eventHandlesThd = eventHandlesThd,
-                        .semaphore = &semaphore,
-                        .sheetPath = sheetPath,
-                        .nodes = nodes,
-                        .attributes = attributes,
-                        .n = n,
-                        .fstSharedDepth = 0,
-                        .currentLeaf = 0,
-                        .error = &error,
-                        .errorThrd = error,
-                        .awaitingThrds = awaitingThrds,
-                        .reservationListsResult = reservationListsResult,
-                        .reservationListsElemResult = reservationListsElemResult,
-                        .result = result,
-                        .sharers = sharers,
-                        .restoreUpTo = 0
-                    };
-					addElement(&allParams[j], &params);
-                    j++;
-                }
-                for (int t = threadsArraySize; t < *nb_process; t++) {
-                    int* reservationListsResult = malloc(n * sizeof(int));
-                    int* reservationListsElemResult = malloc(n * sizeof(int));
-                    sharing* result = malloc(n * sizeof(sharing));
-                    sharerResult* sharers = malloc(n * sizeof(int));
-                    for (int k = 0; k < n; k++) {
-                        result[k].result.result = -1;
-                    }
-                    ThreadParams params = {
-                        .sort_info_path = sort_info_path,
-                        .eventHandlesThd = eventHandlesThd,
-                        .semaphore = &semaphore,
-                        .sheetPath = sheetPath,
-                        .nodes = nodes,
-                        .attributes = attributes,
-                        .n = n,
-                        .fstSharedDepth = 0,
-                        .currentLeaf = 0,
-                        .error = &error,
-                        .errorThrd = error,
-                        .awaitingThrds = awaitingThrds,
-                        .reservationListsResult = reservationListsResult,
-                        .reservationListsElemResult = reservationListsElemResult,
-                        .result = result,
-                        .sharers = sharers,
-                        .restoreUpTo = 0
-                    };
-                    addElement(&allParams[t], &params);
-                }
-            }
-		    break;
+    cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
+    cJSON* threadsArray = cJSON_GetObjectItem(bufferJS, "threads");
+	*nb_params = max(cJSON_GetArraySize(threadsArray), *nb_process);
+	allParams = malloc(*nb_params * sizeof(ThreadParams));
+	int i = 0;
+	cJSON* thread;
+    cJSON_ArrayForEach(thread, threadsArray) {
+        cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
+		allParams[i].result = malloc(cJSON_GetArraySize(resultJS) * sizeof(sharing));
+        int k = 0;
+        cJSON* cJSONEl;
+        cJSON_ArrayForEach(cJSONEl, resultJS) {
+            cJSON* resultAtt = cJSON_GetObjectItem(cJSONEl, "result");
+            cJSON* reservationListInd = cJSON_GetObjectItem(cJSONEl, "reservationListInd");
+			allParams[i].result[k].result.result = resultAtt->valueint;
+			allParams[i].result[k].result.reservationListInd = reservationListInd->valueint;
+            k++;
         }
+        cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
+		allParams[i].sharers = malloc(cJSON_GetArraySize(sharersJS) * sizeof(sharerResult));
+        int k = 0;
+        cJSON* cJSONEl;
+        cJSON_ArrayForEach(cJSONEl, sharersJS) {
+            cJSON* sharerAtt = cJSON_GetObjectItem(cJSONEl, "sharer");
+            cJSON* resultAtt = cJSON_GetObjectItem(cJSONEl, "result");
+			allParams[i].sharers[k].sharer = sharerAtt->valueint;
+			allParams[i].sharers[k].result.result = resultAtt->valueint;
+            k++;
+        }
+        i++;
     }
-    unlockFile(&hFile, &ov);
-
-
-    // Cleanup
-    cJSON_Delete(json);
-    free(fileContent);
+    
+	cleanFile(&hFile, &ov, file, fileContent, json);
 }
-
 
 inline int openTxtFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, char* file_path) {
     if (lockFile(hFile, ov, file_path)) {
@@ -610,86 +496,108 @@ inline void cleanFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileConte
     unlockFile(&hFile, &ov);
 }
 
-inline int updateThrdAchiev(cJSON* sheetIDToBuffer, char* sheetID, int isCompleteSorting, int* error, cJSON* waitingSheets, cJSON* json, ThreadParams* allParams, int rank, int n) {
+inline void updateThrdAchiev(cJSON* sheetIDToBuffer, char* sheetID, char* sheetPath, int isCompleteSorting, int* error, cJSON* waitingSheets, cJSON* json, ThreadParams* allParams, int rank, int n, sharing* result, sharerResult* sharers, int* stopAll) {
+    int stillRelvt = 1;
+    cJSON* sheetPathToSheetID = cJSON_GetObjectItem(json, "sheetPathToSheetID");
+    cJSON* sheetIDJS = cJSON_GetObjectItem(sheetPathToSheetID, sheetPath);
+    if (strcmp(sheetIDJS->valuestring, sheetID) != 0) {
+        stillRelvt = 0;
+    }
+    else if (*error == 0) {
+        stillRelvt = isCompleteSorting;
+    }
     int toUpdate = 0;
-    cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
-    if (isCompleteSorting) {
-        if (*error == 0) {
-            cJSON_DeleteItemFromObject(bufferJS, "threads");
-            cJSON_DeleteItemFromObject(bufferJS, "toUpdate");
-            cJSON_DeleteItemFromObject(bufferJS, "updated");
-            int i = 0;
-            cJSON* waitingSheet;
-            cJSON_ArrayForEach(waitingSheet, waitingSheets) {
-                if (strcmp(waitingSheet->valuestring, sheetID) == 0) {
-                    cJSON_DeleteItemFromArray(waitingSheets, i);
-                    break;
-                }
-                i++;
-            }
-        }
+
+	if (stillRelvt) {
+        cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
         cJSON* toUpdateJS = cJSON_GetObjectItem(bufferJS, "toUpdate");
         toUpdate = toUpdateJS->valueint;
-        if (toUpdate) {
-            cJSON* sheetPathJS = cJSON_GetObjectItem(bufferJS, "sheetPath");
-            char* sheetPath = sheetPathJS->valuestring;
-            cJSON* sheetPathToSheetID = cJSON_GetObjectItem(json, "sheetPathToSheetID");
-            cJSON* sheetIDJS = cJSON_GetObjectItem(sheetPathToSheetID, sheetPath);
-            if (strcmp(sheetIDJS->valuestring, sheetID) != 0) {
-                toUpdate = -1;
-            }
-        }
-        if (toUpdate != -1) {
+        if (isCompleteSorting) {
             cJSON* errorJS = cJSON_GetObjectItem(bufferJS, "error");
             cJSON_ReplaceItemInObject(bufferJS, "error", cJSON_CreateNumber(*error));
             cJSON* resultNodesArray = cJSON_GetObjectItem(bufferJS, "resultNodes");
             for (int j = 0; j < n; j++) {
-                cJSON_ReplaceItemInArray(resultNodesArray, j, cJSON_CreateNumber(allParams[rank].result[j].nodeId));
+                cJSON_ReplaceItemInArray(resultNodesArray, j, cJSON_CreateNumber(result[j].nodeId));
             }
             if (toUpdate) {
                 // call VBA
             }
         }
-    }
-    if (toUpdate != -1) {
-        cJSON* threadsArray = cJSON_GetObjectItem(bufferJS, "threads");
-        int j = 0;
-        cJSON* thread = cJSON_GetArrayItem(threadsArray, rank);
-        cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
-        int k = 0;
-        cJSON* resultElmnt;
-        cJSON_ArrayForEach(resultElmnt, resultJS) {
-            cJSON* resultAtt = cJSON_GetObjectItem(resultElmnt, "result");
-            cJSON* reservationListInd = cJSON_GetObjectItem(resultElmnt, "reservationListInd");
-            if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
-                cJSON_ReplaceItemInObject(resultElmnt, "result", cJSON_CreateNumber(allParams[rank].result[k].result.result));
-                cJSON_ReplaceItemInObject(resultElmnt, "reservationListInd", cJSON_CreateNumber(allParams[rank].result[k].result.reservationListInd));
+        if (*error) {
+            cJSON* threadsArray = cJSON_GetObjectItem(bufferJS, "threads");
+            int j = 0;
+            cJSON* thread = cJSON_GetArrayItem(threadsArray, rank);
+            cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
+            int k = 0;
+            cJSON* resultElmnt;
+            cJSON_ArrayForEach(resultElmnt, resultJS) {
+                cJSON* resultAtt = cJSON_GetObjectItem(resultElmnt, "result");
+                cJSON* reservationListInd = cJSON_GetObjectItem(resultElmnt, "reservationListInd");
+                if (resultAtt && cJSON_IsNumber(resultAtt) && reservationListInd && cJSON_IsNumber(reservationListInd)) {
+                    cJSON_ReplaceItemInObject(resultElmnt, "result", cJSON_CreateNumber(result[k].result.result));
+                    cJSON_ReplaceItemInObject(resultElmnt, "reservationListInd", cJSON_CreateNumber(result[k].result.reservationListInd));
+                }
+                k++;
             }
-            k++;
-        }
-        cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
-        int k = 0;
-        cJSON* sharer;
-        cJSON_ArrayForEach(sharer, sharersJS) {
-            cJSON* sharerAtt = cJSON_GetObjectItem(sharer, "sharer");
-            cJSON* resultAtt = cJSON_GetObjectItem(sharer, "result");
-            if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
-                cJSON_ReplaceItemInObject(sharer, "sharer", cJSON_CreateNumber(allParams[rank].sharers[k].sharer));
-                cJSON_ReplaceItemInObject(sharer, "result", cJSON_CreateNumber(allParams[rank].sharers[k].result.result));
+            cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
+            int k = 0;
+            cJSON* sharer;
+            cJSON_ArrayForEach(sharer, sharersJS) {
+                cJSON* sharerAtt = cJSON_GetObjectItem(sharer, "sharer");
+                cJSON* resultAtt = cJSON_GetObjectItem(sharer, "result");
+                if (sharerAtt && cJSON_IsNumber(sharerAtt) && resultAtt && cJSON_IsNumber(resultAtt)) {
+                    cJSON_ReplaceItemInObject(sharer, "sharer", cJSON_CreateNumber(sharers[k].sharer));
+                    cJSON_ReplaceItemInObject(sharer, "result", cJSON_CreateNumber(sharers[k].result.result));
+                }
+                k++;
             }
-            k++;
         }
-    }
+	}
 }
 
-inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, cJSON* sheetIDToBuffer) {
-    if (cJSON_GetArraySize(waitingSheets) == 0) {
+inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, cJSON* sheetIDToBuffer, int prbInd, problemSt** allProblems, int* nb_allProblems, Node* nodes, attributeSt* attributes, int* n, int* error, int* nb_att) {
+    const int fstNbItBefUpdErr = 50;
+
+
+    if (cJSON_GetArraySize(waitingSheets)) {
         cJSON* waitingSheet = cJSON_GetArrayItem(waitingSheets, 0);
-        *stopAll = strcmp(waitingSheet->valuestring, sheetID);
-        if (*stopAll != 0) {
-            cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
-            getNodes(sort_info_path, nodes, attributes, sheetPath, &n, &nb_att);
-            getPrevSort(sort_info_path, allParams, nodes, attributes, nb_process, n, nb_att, sheetPath);
+        if (!sheetID) {
+            *stopAll = 1;
+        }
+        else {
+            *stopAll = strcmp(waitingSheet->valuestring, sheetID);
+        }
+        if (*stopAll) {
+            allProblems[prbInd]->nb_process_on_it--;
+            if (!allProblems[prbInd]->nb_process_on_it) {
+                (*nb_allProblems)--;
+                for (int j = prbInd; j < *nb_allProblems; j++) {
+                    allProblems[j] = allProblems[j + 1];
+                }
+                allProblems = realloc(allProblems, *nb_allProblems * sizeof(problemSt*));
+            }
+			sheetID = waitingSheet->valuestring;
+            int found = 0;
+            for (int i = 0; i < *nb_allProblems; i++) {
+                if (strcmp(allProblems[i]->sheetID, sheetID) == 0) {
+                    nodes = allProblems[i]->nodes;
+                    attributes = allProblems[i]->attributes;
+                    *n = allProblems[i]->n;
+                    *error = allProblems[i]->error;
+                    *nb_att = allProblems[i]->nb_att;
+					allProblems[i]->nb_process_on_it++;
+                    found = 1;
+                    break;
+                }
+            }
+            if(!found) {
+                (*nb_allProblems)++;
+				allProblems = realloc(allProblems, *nb_allProblems * sizeof(problemSt*));
+                cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
+                getNodes();
+                getPrevSort();
+            }
+            initBefUpdErr = fstNbItBefUpdErr;
         }
     }
     else {
@@ -699,8 +607,7 @@ inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, 
 }
 
 // Function to search and modify the content in the file
-inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting, HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, int nbItBefUpdErr, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node* nodes, int* stopAll) {
-
+inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting, HANDLE semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, int nbItBefUpdErr, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node* nodes, int* stopAll, int* activeThrd) {
 	HANDLE hFile;
 	OVERLAPPED ov;
 	FILE* file;
@@ -716,17 +623,17 @@ inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting
 		updateThrdAchiev(sheetIDToBuffer, sheetID, isCompleteSorting, error, waitingSheets, json, allParams, rank, n);
     }
 
-	*stopAll = 0;
 
 	cJSON* nb_processJS = cJSON_GetObjectItem(json, "nb_process");
-	int nb_process = nb_processJS->valueint;
-    if (nb_process < nb_process) {
-        if (rank >= nb_process) {
-            allParams[rank].fstSharedDepth = -1;
-            if (rank == nb_process - 1) {
-                for (int i = nb_process - 2; i >= nb_process; i--) {
-                    if (allParams[i].fstSharedDepth != -1) {
-                        new_nb_process(i);
+	int new_nb_process = nb_processJS->valueint;
+    *stopAll = 0;
+    if (new_nb_process < nb_process) {
+        if (rank >= new_nb_process) {
+            activeThrd[rank] = 0;
+            if (rank == new_nb_process - 1) {
+                for (int i = nb_process - 2; i >= new_nb_process; i--) {
+                    if (activeThrd[i] != -1) {
+                        chg_nb_process(new_nb_process);
                         break;
                     }
                 }
@@ -734,8 +641,8 @@ inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting
             *stopAll = 2;
         }
 	}
-	else if (nb_process > nb_process) {
-		new_nb_process(nb_process);
+	else if (new_nb_process > nb_process) {
+        chg_nb_process(new_nb_process);
 	}
 
     if (*stopAll == 0) {
@@ -796,18 +703,18 @@ inline void chooseNextOpt(HANDLE semaphore, int* befUpdErr, int* errorThrd, int*
 
 
     // if the tree is shared with another thread at this depth
-    if (*depth == lastSharedDepth) {
+    if (*depth == *lastSharedDepth) {
         WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
         result[*depth].result = sharers[*depth].result;
     }
 
     if (reservationRules[*depth].resList == -1) {
         do {
-            if (result[*depth].result.result == rests[*depth].size) {
+            result[*depth].result.result++;
+            if (result[*depth].result.result >= rests[*depth].size) {
                 ascending = 0;
                 break;
             }
-            result[*depth].result.result++;
             result[*depth].nodeId = ((int*)rests[*depth].data)[result[*depth].result.result];
 			if (check_conditions(result, &nodes[result[*depth].nodeId], *depth)) {
                 break;
@@ -821,58 +728,149 @@ inline void chooseNextOpt(HANDLE semaphore, int* befUpdErr, int* errorThrd, int*
 	updateErrors(error);
 
     // if the tree is shared with another thread at this depth
-    if (*depth == lastSharedDepth) {
-        allParams[sharers[*depth].sharer].sharers[*depth].result = result[*depth].result;
+    if (*depth == *lastSharedDepth) {
+        if (result[*depth].result.result > rests[*depth].size) {
+            (*lastSharedDepth)--;
+        }
+        else {
+            allParams[sharers[*depth].sharer].sharers[*depth].result = result[*depth].result;
+            if (result[*depth].result.result == rests[*depth].size) {
+                (*lastSharedDepth)--;
+            }
+        }
         ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
     }
 }
 
-inline int updateThread(int* befUpdErr, HANDLE semaphore, int* errorThrd, int* error, int* depth, int* nb_awaitingThrds, int* lastSharedDepth, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, ThreadEvent* threadEvents, int nbItBefUpdErr) {
-    (*befUpdErr)--;
-    if (*befUpdErr == 0) {
-        WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-        error[n - 1] = *error;
-        int stopAll;
-        modifyFile();
-        if (stopAll) {
-            if (stopAll == 2) {
-                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                return 0;
-            }
-            *depth = 0;
-        }
-        if (*nb_awaitingThrds > 0 && *lastSharedDepth < n - 2) {
-            int otherRank = awaitingThrds[*nb_awaitingThrds - 1];
-			(*nb_awaitingThrds)--;
-			awaitingThrds = realloc(awaitingThrds, *nb_awaitingThrds * sizeof(int));
+inline int updateBefUpd() {
+    const int incremBefUpdErr = 50;
+
+
+    if (errorThrd != *error) {
+        initBefUpdErr += incremBefUpdErr;
+	}
+	else {
+        initBefUpdErr -= incremBefUpdErr;
+	}
+    if (errors[n - 1] < *error) {
+        *error = errors[n - 1];
+    }
+    else {
+        errors[n - 1] = *error;
+        if (isCompleteSorting) {
             ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-            (*lastSharedDepth)++;
-            ThreadParams* otherParams;
-            otherParams = &allParams[otherRank];
-            otherParams->fstSharedDepth = *lastSharedDepth;
-            for (int i = 0; i <= *lastSharedDepth; i++) {
-                otherParams->result[i].result = result[i].result;
-            }
-            otherParams->sharers[*lastSharedDepth].sharer = rank;
-            otherParams->sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
-            sharers[*lastSharedDepth].sharer = otherRank;
-            sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
-            SetEvent(threadEvents[rank].eventHandlesThd);
+            return 0;
         }
-        else {
+    }
+    if (!*befUpdErr) {
+        *befUpdErr = initBefUpdErr;
+    }
+}
+
+inline int updateThread(int* befUpdErr, HANDLE semaphore, int* errors, int* error, int* depth, int* nb_awaitingThrds, int* lastSharedDepth, int n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, ThreadEvent* threadEvents, int nbItBefUpdErr, int isCompleteSorting) {
+    WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
+	updateBefUpd();
+    int stopAll;
+    modifyFile();
+    if (stopAll) {
+        if (stopAll == 2) {
             ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+            return 1;
         }
-        *befUpdErr = nbItBefUpdErr;
+        *depth = 0;
+    }
+    if (*nb_awaitingThrds > 0 && *lastSharedDepth < n - 2) {
+        int otherRank = awaitingThrds[*nb_awaitingThrds - 1];
+		(*nb_awaitingThrds)--;
+		awaitingThrds = realloc(awaitingThrds, *nb_awaitingThrds * sizeof(int));
+        ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+        (*lastSharedDepth)++;
+        ThreadParams* otherParams;
+        otherParams = &allParams[otherRank];
+        otherParams->fstSharedDepth = *lastSharedDepth;
+        for (int i = 0; i <= *lastSharedDepth; i++) {
+            otherParams->result[i].result = result[i].result;
+        }
+        otherParams->sharers[*lastSharedDepth].sharer = rank;
+        otherParams->sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
+        sharers[*lastSharedDepth].sharer = otherRank;
+        sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
+        SetEvent(threadEvents[rank].eventHandlesThd);
+    }
+    else {
+        ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
     }
 	return 0;
 }
 
+inline int reallocVar() {
+    problem->nb_process_on_it++;
+    resultNodes = malloc(n * sizeof(int));
+    const busyNodes = malloc(n * sizeof(int));
+    rests = malloc(n * sizeof(GenericList));
+    reservationRules = malloc((n + 1) * sizeof(ReservationRule));
+    reservationLists = malloc((n - 1) * sizeof(ReservationList));
+    startExcl = malloc(n * sizeof(GenericList));
+    endExcl = malloc(n * sizeof(GenericList));
+    errors = malloc(n * sizeof(int));
+    errors[0] = 0;
+    for (int i = 0; i < n + 1; i++) {
+        busyNodes[i] = nodes[i].nbPost;
+        initList(&rests[i], sizeof(int), 1);
+        reservationRules[i].resList = -1;
+    }
+    for (int i = 0; i < n; i++) {
+		result[i].result = -1;
+        Node* node = &nodes[i];
+        for (int j = 0; j < node->nb_allowedPlaces; i++) {
+            if (node->allowedPlaces[j].start != 0) {
+                addElement(&startExcl[node->allowedPlaces[j].start], i);
+            }
+            else if (j == 0) {
+                busyNodes[i]++;
+            }
+            addElement(&endExcl[node->allowedPlaces[j].end], i);
+        }
+        if (busyNodes[i] == 0 && check_conditions(nodes, node, i)) {
+            addElement(&(rests[0]), &i);
+        }
+    }
+    for (int i = 0; i < n - 1; i++) {
+        initList(&(reservationLists[i].data), sizeof(int), 1);
+        notChosenAnymore(&nodes[i], n, i, reservationRules, reservationLists, startExcl, endExcl);
+    }
+}
+
+inline int waitOrSearchForJob(HANDLE* semaphore, int* nb_params, int nb_process_on_it, int nb_awaitingThrds, int nb_process, HANDLE* mainSemaphore) {
+    WaitForSingleObject(semaphore, INFINITE);
+    if (*nb_params > nb_process_on_it) {
+        (*nb_params)--;
+        *currentParams = allParams[nb_params];
+        allParams = realloc(allParams, nb_params * sizeof(ThreadParams));
+        fstSharedDepth = currentParams->fstSharedDepth;
+        result = currentParams->result;
+        sharers = currentParams->sharers;
+        ReleaseSemaphore(semaphore, 1, NULL);
+    }
+    else if (nb_awaitingThrds == nb_process) {
+        ReleaseSemaphore(mainSemaphore, 1, NULL);
+        ReleaseSemaphore(semaphore, 1, NULL);
+        return;
+    }
+    else {
+        nb_awaitingThrds++;
+        awaitingThrds = realloc(awaitingThrds, nb_awaitingThrds * sizeof(int));
+        awaitingThrds[nb_awaitingThrds] = rank;
+        ReleaseSemaphore(semaphore, 1, NULL);
+        WaitForSingleObject(threadEvent[rank].eventHandlesThd, INFINITE);
+        lastSharedDepth = fstSharedDepth;
+    }
+    reallocVar();
+    depth = 0;
+}
+
 // Recursive function to try all possible ways to sort the integer
 DWORD WINAPI threadSort(LPVOID lpParam) {
-    const int fstNbItBefUpdErr = 50;
-    const int nbItBefUpdErr = 10000;
-
-
     // Cast lpParam to the appropriate structure type
     ThreadParamsRank* threadParamsRank = (ThreadParamsRank*)lpParam;
     MeetPoint* meetPoint = threadParamsRank->meetPoint;
@@ -887,8 +885,10 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
     int nb_att = meetPoint->nb_att;
     int* error = meetPoint->error;
     ThreadParams* allParams = meetPoint->allParams;
+    int nb_params = meetPoint->nb_params;
     int* awaitingThrds = meetPoint->awaitingThrds;
     int nb_awaitingThrds = meetPoint->nb_awaitingThrds;
+	int* activeThrd = meetPoint->activeThrd;
 
     int rank = threadParamsRank->rank;
 
@@ -902,62 +902,24 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 	int ascending = 1;
     int found = 0;
     int currentElement;
-	int befUpdErr = fstNbItBefUpdErr;
+	int befUpdErr;
     int startInd = 0;
     int depth = 0;
     int nodId;
-	int* resultNodes = malloc(n * sizeof(int));
-	int* const busyNodes = malloc(n * sizeof(int));
-	GenericList* const rests = malloc(n * sizeof(GenericList));
-    ReservationRule* const reservationRules = malloc((n + 1) * sizeof(ReservationRule));
-    ReservationList* const reservationLists = malloc((n - 1) * sizeof(ReservationList));
-	GenericList* const startExcl = malloc(n * sizeof(GenericList));
-	GenericList* const endExcl = malloc(n * sizeof(GenericList));
-    int* const errors = malloc(n * sizeof(int));
-	errors[0] = 0;
-    for (int i = 0; i < n + 1; i++) {
-        busyNodes[i] = nodes[i].nbPost;
-        initList(&rests[i], sizeof(int), 1);
-        reservationRules[i].resList = -1;
-    }
-    for (int i = 0; i < n; i++) {
-		Node* node = &nodes[i];
-        for (int j = 0; j < node->nb_allowedPlaces; i++) {
-            if (node->allowedPlaces[j].start != 0) {
-                addElement(&startExcl[node->allowedPlaces[j].start], i);
-			}
-			else if (j == 0) {
-				busyNodes[i]++;
-			}
-            addElement(&endExcl[node->allowedPlaces[j].end], i);
-        }
-		if (busyNodes[i] == 0 && check_conditions(nodes, node, i)) {
-			addElement(&(rests[0]), &i);
-        }
-    }
-    for (int i = 0; i < n - 1; i++) {
-        initList(&(reservationLists[i].data), sizeof(int), 1);
-        notChosenAnymore(&nodes[i], n, i, reservationRules, reservationLists, startExcl, endExcl);
-    }
-	int searchingRoot = 0;
-	int* neighborRanks = malloc(n * sizeof(int));
 
-	// all the threads except the first one get in a state of waiting for the first to share.
-    if (rank != 0) {
-        if (reservationRules[0].resList == -1) {
-            result[0].result.result = rests[depth].size;
-        }
-		else {
-			int placeInd = reservationRules[depth].resList;
-            while (placeInd != -1) {
-                placeInd = reservationLists[placeInd].nextListInd;
-            }
-            result[depth].result.result = reservationLists[placeInd].data.size;
-            result[depth].result.reservationListInd = placeInd;
-		}
-    }
+	activeThrd[rank] = 1;
 
-	if (updateThread(semaphore, &befUpdErr, &errorThrd, &depth, &lastSharedDepth, nbItBefUpdErr, reservationLists, reservationRules, busyNodes, &ascending, error, &nb_awaitingThrds, n, awaitingThrds, allParams, result, rank, sharers, eventHandlesThd)) {
+    int* resultNodes = NULL;
+    int* const busyNodes = NULL;
+    GenericList* const rests = NULL;
+    ReservationRule* const reservationRules = NULL;
+    ReservationList* const reservationLists = NULL;
+    GenericList* const startExcl = NULL;
+    GenericList* const endExcl = NULL;
+    int* const errors = NULL;
+
+
+	if (updateThread()) {
 		return;
     }
     // main loop
@@ -967,24 +929,9 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         if (ascending == 1) {
             depth++;
             if (depth == n) {
-                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-                if (error[n - 1] < *error) {
-                    *error = error[n - 1];
-                }
-                else {
-                    error[n - 1] = *error;
-                }
-                int stopAll;
-                modifyFile();
-				if (stopAll) {
-					if (stopAll == 2) {
-						ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                        return;
-					}
-                    depth = 0;
+				if (updateThread()) {
+					return;
 				}
-                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-				befUpdErr = nbItBefUpdErr;
 				ascending = 0;
             }
             else {
@@ -1069,39 +1016,36 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
             result[depth].result.result = -1;
 			depth--;
             if (depth == fstSharedDepth) {
-                WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
-                error[n - 1] = *error;
-                addElement(awaitingThrds, &rank);
-                ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
-                WaitForSingleObject(threadEvent[rank].eventHandlesThd, INFINITE);
-                ResetEvent(threadEvent[rank].eventHandlesThd);
+                waitOrSearchForJob();
             }
-			if (updateThread()) {
-                return;
-            }
-            nodes[result[depth].nodeId].nbPost--;
-            notChosenAnymore();
-            for (int j = 0; j < nodes[result[depth].nodeId].nb_ulteriors; j++) {
-                int ulterior = ((int*)nodes[result[depth].nodeId].nb_ulteriors)[j];
-                nodes[ulterior].nbPost++;
-            }
+            else {
+                befUpdErr--;
+                if (!befUpdErr && updateThread()) {
+                    return;
+                }
+                nodes[result[depth].nodeId].nbPost--;
+                notChosenAnymore();
+                for (int j = 0; j < nodes[result[depth].nodeId].nb_ulteriors; j++) {
+                    int ulterior = ((int*)nodes[result[depth].nodeId].nb_ulteriors)[j];
+                    nodes[ulterior].nbPost++;
+                }
 
-            // what being at this depth implies
-            for (int i = 0; i < startExcl[depth].size; i++) {
-                nodes[((int*)startExcl[depth].data)[i]].nbPost--;
+                // what being at this depth implies
+                for (int i = 0; i < startExcl[depth].size; i++) {
+                    nodes[((int*)startExcl[depth].data)[i]].nbPost--;
+                }
+                for (int i = 0; i < endExcl[depth].size; i++) {
+                    nodes[((int*)endExcl[depth].data)[i]].nbPost++;
+                }
+                depth--;
             }
-            for (int i = 0; i < endExcl[depth].size; i++) {
-                nodes[((int*)endExcl[depth].data)[i]].nbPost++;
-            }
-            depth--;
         }
     }
 }
 
-inline void chg_nb_process(int* nb_process, ThreadParams* allParams, ThreadEvent* threadEvents, int new_nb_process) {
+inline void chg_nb_process(int* nb_process, ThreadParams* allParams, ThreadEvent* threadEvents, int new_nb_process, int* activeThrd) {
 	for (int i = nb_process; i < new_nb_process; i++) {
 		allParams = realloc(allParams, (i + 1) * sizeof(ThreadParams));
-		allParams[i].fstSharedDepth = 0;
         threadEvents = realloc(threadEvents, (i + 1) * sizeof(ThreadEvent));
         ThreadEvent threadEvent = {
 			.eventHandlesThd = CreateEvent(NULL, FALSE, FALSE, NULL),
@@ -1112,9 +1056,34 @@ inline void chg_nb_process(int* nb_process, ThreadParams* allParams, ThreadEvent
 	for (int i = new_nb_process; i < nb_process; i++) {
 		CloseHandle(threadEvents[i].hThread);
 		CloseHandle(threadEvents[i].eventHandlesThd);
+        allParams = realloc(allParams, (i + 1) * sizeof(ThreadParams));
         threadEvents = realloc(threadEvents, (i + 1) * sizeof(ThreadEvent));
 	}
 	nb_process = new_nb_process;
+}
+
+inline int giveJob(HANDLE* semaphore, int* awaitingThrds, int* nb_awaitingThrds, int* lastSharedDepth, ThreadParams* allParams, sharing* result, int rank, char* sheetID, problemSt* problem) {
+    WaitForSingleObject(semaphore, INFINITE);
+    int otherRank = awaitingThrds[*nb_awaitingThrds - 1];
+    (*nb_awaitingThrds)--;
+    awaitingThrds = realloc(awaitingThrds, *nb_awaitingThrds * sizeof(int));
+    ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
+    (*lastSharedDepth)++;
+    ThreadParams* otherParams = &allParams[otherRank];
+    if (strcmp(otherParams->problem->sheetID, sheetID)) {
+		otherParams->problem = problem;
+		reallocVar();
+    }
+    otherParams->fstSharedDepth = *lastSharedDepth;
+    for (int i = 0; i <= *lastSharedDepth; i++) {
+        otherParams->result[i].result = result[i].result;
+    }
+    otherParams->sharers[*lastSharedDepth].sharer = rank;
+    otherParams->sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
+    sharers[*lastSharedDepth].sharer = otherRank;
+    sharers[*lastSharedDepth].result = result[*lastSharedDepth].result;
+    SetEvent(threadEvents[rank].eventHandlesThd);
+    ReleaseSemaphore(meetPoint.semaphore, 1, NULL);
 }
 
 int main(int argc, char* argv[]) {
@@ -1123,18 +1092,14 @@ int main(int argc, char* argv[]) {
 
     MeetPoint meetPoint = {
 		.sort_info_path = sort_info_path,
+		.mainSemaphore = CreateSemaphore(NULL, 1, 1, NULL),
 		.semaphore = CreateSemaphore(NULL, 1, 1, NULL),
 		.threadEvents = NULL,
 		.nb_process = 0,
-		.sheetID = NULL,
-		.nodes = NULL,
-		.n = 0,
-		.attributes = NULL,
-		.nb_att = 0,
-		.error = 0,
 		.allParams = NULL,
-		.awaitingThrds = NULL,
-		.nb_awaitingThrds = 0
+		.awaitingThrds = 0,
+		.nb_awaitingThrds = 0,
+		.activeThrd = NULL
     };
     ThreadParamsRank allParamsRank = {
         .meetPoint = &meetPoint,
@@ -1142,21 +1107,14 @@ int main(int argc, char* argv[]) {
     };
 
 	// Create a new thread
-	chg_nb_process(&meetPoint.nb_process, meetPoint.allParams, meetPoint.threadEvents, 1);
+    modifyFile();
 
-	// Wait for all threads to finish
-    int p;
-    while (meetPoint.nb_process) {
-        WaitForSingleObject(meetPoint.semaphore, INFINITE);
-		for (int i = 0; i < meetPoint.nb_process; i++) {
-			if (meetPoint.allParams[i].fstSharedDepth != -1) {
-				p = i;
-				break;
-			}
-		}
-		ReleaseSemaphore(meetPoint.semaphore, 1, NULL);
-        WaitForSingleObject(meetPoint.threadEvents[p].hThread, INFINITE);
-    }
+	int lastSharedDepth = -2;
+    giveJob();
+
+	WaitForSingleObject(meetPoint.mainSemaphore, INFINITE);
+
+	chg_nb_process();
 
     return 0;
 }
