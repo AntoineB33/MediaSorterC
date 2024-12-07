@@ -496,7 +496,7 @@ inline void cleanFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileConte
     unlockFile(&hFile, &ov);
 }
 
-inline void updateThrdAchiev(cJSON* sheetIDToBuffer, char* sheetID, char* sheetPath, int isCompleteSorting, int* error, cJSON* waitingSheets, cJSON* json, ThreadParams* allParams, int rank, int n, sharing* result, sharerResult* sharers, int* stopAll) {
+inline void updateThrdAchiev(cJSON* sheetIDToBuffer, char* sheetID, char* sheetPath, int isCompleteSorting, int* error, cJSON* json, int rank, int n, sharing* result, sharerResult* sharers) {
     int stillRelvt = 1;
     cJSON* sheetPathToSheetID = cJSON_GetObjectItem(json, "sheetPathToSheetID");
     cJSON* sheetIDJS = cJSON_GetObjectItem(sheetPathToSheetID, sheetPath);
@@ -621,7 +621,7 @@ inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting
     cJSON* sheetIDToBuffer = cJSON_GetObjectItem(json, "sheetIDToBuffer");
     if (*sheetID) {
         updateBefUpd(errorThrd, error, initBefUpdErr, errors, n, isCompleteSorting, semaphore, befUpdErr);
-		updateThrdAchiev(sheetIDToBuffer, sheetID, isCompleteSorting, error, waitingSheets, json, allParams, rank, n);
+		updateThrdAchiev(sheetIDToBuffer, sheetID, sort_info_path, isCompleteSorting, error, json, rank, n, result, sharers);
     }
 
 
@@ -634,7 +634,7 @@ inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting
             if (rank == new_nb_process - 1) {
                 for (int i = nb_process - 2; i >= new_nb_process; i--) {
                     if (activeThrd[i] != -1) {
-                        chg_nb_process(new_nb_process);
+                        chg_nb_process(new_nb_process, allParams, threadEvents, new_nb_process, activeThrd);
                         break;
                     }
                 }
@@ -643,7 +643,7 @@ inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting
         }
 	}
 	else if (new_nb_process > nb_process) {
-        chg_nb_process(new_nb_process);
+        chg_nb_process(new_nb_process, allParams, threadEvents, new_nb_process, activeThrd);
 	}
 
     if (*stopAll == 0) {
