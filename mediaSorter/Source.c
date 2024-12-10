@@ -1104,6 +1104,7 @@ int main(int argc, char* argv[]) {
 	// Create a new thread
 	int stopAll = 0;
     modifyFile(sort_info_path, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, meetPoint.allParams, NULL, NULL, NULL, 0, NULL, NULL, NULL, &stopAll, NULL, NULL, NULL, 0, NULL, &meetPoint.nb_allProblems, NULL, NULL);
+    modifyFile(sort_info_path, sheetID, isCompleteSorting, semaphore, befUpdErr, errorThrd, depth, lastSharedDepth, reservationLists, reservationRules, busyNodes, ascending, error, nb_awaitingThrds, n, awaitingThrds, allParams, result, rank, sharers, nb_process, threadEvents, rests, nodes, stopAll, activeThrd, sheetPath, initBefUpdErr, prbInd, allProblems, nb_allProblems, attributes, nb_att);
 
 	int lastSharedDepth = -2;
     giveJob(&meetPoint.semaphore, meetPoint.awaitingThrds, &meetPoint.nb_awaitingThrds, &lastSharedDepth, meetPoint.allParams, result, rank, sheetID, problem, sharers, threadEvents, &busyNodes, n, &rests, &reservationLists, &reservationRules, startExcl, endExcl, errors, nodes);
