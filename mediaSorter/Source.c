@@ -86,7 +86,6 @@ typedef struct {
     int n;
     attributeSt* attributes;
     int nb_att;
-    int error;
     int nb_process_on_it;
 } problemSt;
 
@@ -115,6 +114,7 @@ typedef struct {
     int* awaitingThrds;
     int nb_awaitingThrds;
 	int* activeThrd;
+    int error;
 } MeetPoint;
 
 typedef struct {
@@ -556,7 +556,7 @@ inline void updateThrdAchiev(cJSON* sheetIDToBuffer, char* sheetID, char* sheetP
 	}
 }
 
-inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, cJSON* sheetIDToBuffer, int prbInd, problemSt** allProblems, int* nb_allProblems, Node* nodes, attributeSt* attributes, int* n, int* error, int* nb_att, char* sheetPath, char* sort_info_path, int* nb_process, ThreadParams* allParams, int* initBefUpdErr) {
+inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, cJSON* sheetIDToBuffer, int prbInd, problemSt** allProblems, int* nb_allProblems, Node** nodes, attributeSt** attributes, int* n, int* error, int** nb_att, char* sheetPath, char* sort_info_path, int* nb_process, ThreadParams* allParams, int* initBefUpdErr) {
     const int fstNbItBefUpdErr = 50;
 
 
@@ -583,11 +583,10 @@ inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, 
             int found = 0;
             for (int i = 0; i < *nb_allProblems; i++) {
                 if (strcmp(allProblems[i]->sheetID, sheetID) == 0) {
-                    nodes = allProblems[i]->nodes;
-                    attributes = allProblems[i]->attributes;
+                    *nodes = &allProblems[i]->nodes;
+                    *attributes = &allProblems[i]->attributes;
                     *n = allProblems[i]->n;
-                    *error = allProblems[i]->error;
-                    *nb_att = allProblems[i]->nb_att;
+                    *nb_att = &allProblems[i]->nb_att;
 					allProblems[i]->nb_process_on_it++;
                     found = 1;
                     break;
@@ -597,7 +596,7 @@ inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, 
                 (*nb_allProblems)++;
 				allProblems = realloc(allProblems, *nb_allProblems * sizeof(problemSt*));
                 cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, sheetID);
-				getNodes(sheetPath, n, nodes, attributes);
+				getNodes(sheetPath, n, *nodes, *attributes);
 				getPrevSort(sort_info_path, sheetIDToBuffer, sheetID, nb_allProblems, nb_process, allParams);
             }
             initBefUpdErr = fstNbItBefUpdErr;
@@ -610,7 +609,7 @@ inline void chkIfSameSheetID(int* stopAll, cJSON* waitingSheets, char* sheetID, 
 }
 
 // Function to search and modify the content in the file
-inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node* nodes, int* stopAll, int* activeThrd, char* sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt* attributes, int* nb_att) {
+inline int modifyFile(char* sort_info_path, char* sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* const rests, Node** nodes, int* stopAll, int* activeThrd, char* sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att) {
 	HANDLE hFile;
 	OVERLAPPED ov;
 	FILE* file;
