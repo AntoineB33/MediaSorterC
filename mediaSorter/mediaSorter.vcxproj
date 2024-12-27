@@ -135,7 +135,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Source.c" />
+    <ClCompile Include="main.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="all_func.h" />
+    <ClInclude Include="list_func.c" />
+    <ClInclude Include="list_func.h" />
+    <ClInclude Include="lock_unlock_files.c" />
+    <ClInclude Include="my_structs.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
