@@ -296,44 +296,40 @@ inline void updateThrdAchiev(cJSON* sheetIDToBuffer, char* sheetID, char* sheetP
 	}
 }
 
-inline void chkIfSameSheetID(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, int reachedEnd, int* fileCleaned, cJSON* waitingSheets, char** sheetID, cJSON* sheetIDToBuffer, int* prbInd, problemSt* allProblems, int* nb_allProblems, Node** nodes, attributeSt** attributes, int* n, int** nb_att, char** sheetPath, char* sort_info_path, int* nb_process, ThreadParams* allParams, int* initBefUpdErr, int* activeThrd, int rank, ThreadParams* paramP) {
+void chkIfSameSheetID(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, int reachedEnd, int* fileCleaned, cJSON* waitingSheets, char** sheetID, cJSON* sheetIDToBuffer, int* prbInd, problemSt** allProblems, int* nb_allProblems, Node** nodes, attributeSt** attributes, int* n, int** nb_att, char** sheetPath, char* sort_info_path, int* nb_process, ThreadParams* allParams, int* initBefUpdErr, int* activeThrd, int rank, ThreadParams* paramP, sharing** result, sharerResult** sharers, int* fstSharedDepth, int** busyNodes, GenericList** rests, ReservationList** reservationLists, ReservationRule** reservationRules, GenericList** startExcl, GenericList** endExcl, int** errors, int* depth, HANDLE* semaphore, int* nb_awaitingThrds, int* awaitingThrds, int* lastSharedDepth, int* befUpdErr, int* errorThrd, int* error, int* stopAll, ThreadEvent* threadEvent) {
     const int fstNbItBefUpdErr = 50;
 
 
     if (!cJSON_GetArraySize(waitingSheets) || cJSON_GetObjectItem(json, "stop")->valueint) {
 		activeThrd[rank] = 0;
 		*n = 0;
-        return 0;
     }
 
     cJSON* waitingSheet = cJSON_GetArrayItem(waitingSheets, 0);
     int diff_sheet = !*sheetID || strcmp(waitingSheet->valuestring, *sheetID);
-    if (!*sheetID || diff_sheet || *n) {
+    if (!*sheetID || diff_sheet || !*n) {
         if (*sheetID && diff_sheet) {
-            allProblems[*prbInd].nb_process_on_it--;
-            if (!allProblems[*prbInd].nb_process_on_it) {
+            (*allProblems)[*prbInd].nb_process_on_it--;
+            if (!(*allProblems)[*prbInd].nb_process_on_it) {
                 // Remove a Problem (because this thread was the last one to work on it)
-                for (int i = 0; i < allProblems[*prbInd].nb_params; i++) {
-                    free(allProblems[*prbInd].allParams[i].result);
-                    free(allProblems[*prbInd].allParams[i].sharers);
+                for (int i = 0; i < (*allProblems)[*prbInd].nb_params; i++) {
+                    free((*allProblems)[*prbInd].allParams[i].result);
+                    free((*allProblems)[*prbInd].allParams[i].sharers);
                 }
-                free(allProblems[*prbInd].allParams);
-                free(allProblems[*prbInd].nodes);
-                free(allProblems[*prbInd].attributes);
-                free(allProblems[*prbInd].sheetID);
-                free(allProblems[*prbInd].sheetPath);
-                removeInd(allProblems, nb_allProblems, *prbInd, sizeof(problemSt));
+                free((*allProblems)[*prbInd].allParams);
+                removeInd((*allProblems), nb_allProblems, *prbInd, sizeof(problemSt));
             }
         }
         if (!*n) {
-			return 0;
+            return;
         }
+        int fstThrdOnPb = 0;
         if (diff_sheet) {
             int found = 0;
             *sheetID = realloc(*sheetID, strlen(waitingSheet->valuestring) + 1);
             strcpy(*sheetID, waitingSheet->valuestring);
             for (int i = 0; i < *nb_allProblems; i++) {
-                if (strcmp(allProblems[i].sheetID, *sheetID)) {
+                if (strcmp((*allProblems)[i].sheetID, *sheetID)) {
                     *prbInd = i;
                     found = 1;
                     break;
@@ -341,53 +337,50 @@ inline void chkIfSameSheetID(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fi
             }
             if (!found) {
                 *prbInd = *nb_allProblems;
-                allProblems = realloc(allProblems, (*nb_allProblems - 1) * sizeof(problemSt));
+                *allProblems = realloc(allProblems, (*nb_allProblems - 1) * sizeof(problemSt));
                 cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, *sheetID);
                 *sheetPath = cJSON_GetObjectItem(bufferJS, "sheetPath")->valuestring;
-                getNodes(*sheetPath, allProblems[*nb_allProblems].nodes, allProblems[*nb_allProblems].attributes, &allProblems[*nb_allProblems].n, &allProblems[*nb_allProblems].nb_att);
-				*nb_allProblems++;
-                getPrevSort(sort_info_path, bufferJS, &allProblems[*prbInd].nb_params, allProblems[*prbInd].allParams);
-                if (!allProblems[*prbInd].nb_params) {
-					paramP->fstSharedDepth = -1;
-					paramP->result = realloc(paramP->result, *n * sizeof(sharing));
-					paramP->sharers = realloc(paramP->sharers, *n * sizeof(sharerResult));
+                getNodes(*sheetPath, (*allProblems)[*nb_allProblems].nodes, (*allProblems)[*nb_allProblems].attributes, &(*allProblems)[*nb_allProblems].n, &(*allProblems)[*nb_allProblems].nb_att);
+                *nb_allProblems++;
+                getPrevSort(sort_info_path, bufferJS, &(*allProblems)[*prbInd].nb_params, (*allProblems)[*prbInd].allParams);
+                if (!(*allProblems)[*prbInd].nb_params) {
+                    *fstSharedDepth = -1;
+                    *result = realloc(*result, *n * sizeof(sharing));
+                    *sharers = realloc(*sharers, *n * sizeof(sharerResult));
                     for (int i = 0; i < *n; i++) {
-                        paramP->result[i].result.reservationListInd = -1;
-                        paramP->result[i].result.result = -1;
+                        (*result)[i].result.reservationListInd = -1;
+                        (*result)[i].result.result = -1;
                     }
+                    fstThrdOnPb = 1;
                 }
             }
-            *nodes = &allProblems[*prbInd].nodes;
-            *attributes = &allProblems[*prbInd].attributes;
-            *n = allProblems[*prbInd].n;
-            *nb_att = &allProblems[*prbInd].nb_att;
-            reallocVar();
-            allProblems[*prbInd]->nb_process_on_it++;
+            *nodes = &(*allProblems)[*prbInd].nodes;
+            *attributes = &(*allProblems)[*prbInd].attributes;
+            *n = (*allProblems)[*prbInd].n;
+            *nb_att = &(*allProblems)[*prbInd].nb_att;
+            reallocVar(busyNodes, *n, &rests, &reservationLists, &reservationRules, startExcl, endExcl, errors, *nodes, result, depth);
+            (*allProblems)[*prbInd].nb_process_on_it++;
         }
-        int paramInd = allProblems[*prbInd].nb_params - 1;
-		if (paramInd == -1) {
-            cleanFile(hFile, ov, file, fileContent, json);
-            waitForJob(allParams[*prbInd].fstSharedDepth, allParams[*prbInd].result, allParams[*prbInd].sharers, *n, *nodes, *attributes, *nb_att, *prbInd, *initBefUpdErr);
-			*fileCleaned = 1;
-			if ()
-		}
-        if (paramInd > -1) {
-            *result = allProblems[*prbInd].allParams[paramInd].result;
-            *sharers = allProblems[*prbInd].allParams[paramInd].sharers;
-            *fstSharedDepth = allProblems[*prbInd].allParams[paramInd].fstSharedDepth;
+        if (!fstThrdOnPb) {
+            int paramInd = (*allProblems)[*prbInd].nb_params - 1;
+            if (paramInd == -1) {
+                cleanFile(hFile, ov, file, fileContent, json);
+				waitForJob(semaphore, allParams[rank].fstSharedDepth, nb_awaitingThrds, awaitingThrds, rank, threadEvent, lastSharedDepth, sort_info_path, sheetID, 0, befUpdErr, errorThrd, error, n, allParams, result, sharers, nb_process, nodes, stopAll, activeThrd, sheetPath, initBefUpdErr, prbInd, allProblems, nb_allProblems, attributes, nb_att, errors, 1, awaitingThrds, waitingSheets, sheetIDToBuffer, paramP, fstSharedDepth, busyNodes, rests, reservationLists, reservationRules, startExcl, endExcl, depth);
+            }
+            if (paramInd > -1) {
+                *result = (*allProblems)[*prbInd].allParams[paramInd].result;
+                *sharers = (*allProblems)[*prbInd].allParams[paramInd].sharers;
+                *fstSharedDepth = (*allProblems)[*prbInd].allParams[paramInd].fstSharedDepth;
+                (*nb_allProblems)--;
+                *allProblems = realloc(allProblems, *nb_allProblems * sizeof(problemSt));
+            }
         }
         *initBefUpdErr = fstNbItBefUpdErr;
     }
 }
-/*
-    HANDLE hFile;
-    OVERLAPPED ov;
-    FILE* file;
-    char* fileContent;
-    cJSON* json;*/
 
 // Function to search and modify the content in the file
-inline int modifyFile(int reachedEnd, char* sort_info_path, char** sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* error, int* nb_awaitingThrds, int* n, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, Node** nodes, int* stopAll, int* activeThrd, char** sheetPath, int* initBefUpdErr, int* prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, int* errors, int notMain, int* awaitingThrds) {
+inline int modifyFile(int reachedEnd, char* sort_info_path, char** sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* error, int* nb_awaitingThrds, int* n, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, Node** nodes, int* stopAll, int* activeThrd, char** sheetPath, int* initBefUpdErr, int* prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, int* errors, int notMain, int* awaitingThrds, int* fileCleaned, ThreadParams* paramP, int* fstSharedDepth, int** busyNodes, GenericList** rests, ReservationList** reservationLists, ReservationRule** reservationRules, GenericList** startExcl, GenericList** endExcl, int* depth, ThreadEvent* threadEvent, int* lastSharedDepth) {
     HANDLE hFile;
     OVERLAPPED ov;
     FILE* file;
@@ -408,8 +401,9 @@ inline int modifyFile(int reachedEnd, char* sort_info_path, char** sheetID, int 
     cJSON* nb_processJS = cJSON_GetObjectItem(json, "nb_process");
     int new_nb_process = nb_processJS->valueint;
     int new_nb_process_temp = new_nb_process;
+    int fileCleaned = 0;
     if (notMain) {
-        chkIfSameSheetID(&hFile, &ov, file, fileContent, json, reachedEnd, waitingSheets, sheetID, sheetIDToBuffer, prbInd, allProblems, nb_allProblems, nodes, attributes, n, nb_att, sheetPath, sort_info_path, nb_process, allParams, initBefUpdErr, activeThrd, rank);
+        chkIfSameSheetID(&hFile, &ov, file, fileContent, json, reachedEnd, &fileCleaned, waitingSheets, sheetID, sheetIDToBuffer, prbInd, allProblems, nb_allProblems, nodes, attributes, n, nb_att, sheetPath, sort_info_path, nb_process, allParams, initBefUpdErr, activeThrd, rank, paramP, result, sharers, fstSharedDepth, busyNodes, rests, reservationLists, reservationRules, startExcl, endExcl, errors, depth, semaphore, nb_awaitingThrds, awaitingThrds, threadEvents, lastSharedDepth, befUpdErr, errorThrd, error, stopAll, threadEvent);
 		if (!*n) {
             new_nb_process = 0;
 		}
@@ -439,7 +433,9 @@ inline int modifyFile(int reachedEnd, char* sort_info_path, char** sheetID, int 
 	}
     chg_nb_process(nb_process, allParams, threadEvents, new_nb_process_temp, activeThrd, nb_allProblems);
 
-    cleanFile(&hFile, &ov, file, fileContent, json);
+	if (!fileCleaned) {
+        cleanFile(&hFile, &ov, file, fileContent, json);
+	}
 
     return 0;
 }
@@ -554,15 +550,10 @@ inline int updateBefUpd(int* errorThrd, int* errors, int n, int* error, int* ini
     errorThrd = *error;
 }
 
-inline int updateThread(int reachedEnd, char* sort_info_path, char** sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* rests, Node* nodes, int* activeThrd, char** sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, problemSt* problem, GenericList** startExcl, GenericList** endExcl, int** errors) {
+inline int updateThread(int reachedEnd, char* sort_info_path, char** sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* rests, Node* nodes, int* activeThrd, char** sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, problemSt* problem, GenericList** startExcl, GenericList** endExcl, int** errors, int* stopAll, int notMain, int* fileCleaned, ThreadParams* paramP, int* fstSharedDepth, ThreadEvent* threadEvent) {
     WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
     int stopAll;
-    HANDLE hFile;
-    OVERLAPPED ov;
-    FILE* file;
-    char* fileContent;
-    cJSON* json;
-	modifyFile(reachedEnd, sort_info_path, sheetID, isCompleteSorting, semaphore, befUpdErr, errorThrd, error, nb_awaitingThrds, n, awaitingThrds, allParams, result, rank, sharers, nb_process, threadEvents, rests, nodes, stopAll, activeThrd, sheetPath, initBefUpdErr, prbInd, allProblems, nb_allProblems, attributes, nb_att, 1);
+    modifyFile(reachedEnd, sort_info_path, sheetID, isCompleteSorting, semaphore, befUpdErr, errorThrd, error, nb_awaitingThrds, n, allParams, result, rank, sharers, nb_process, threadEvents, nodes, stopAll, activeThrd, sheetPath, initBefUpdErr, prbInd, allProblems, nb_allProblems, attributes, nb_att, errors, 1, awaitingThrds, fileCleaned, paramP, fstSharedDepth, busyNodes, rests, reservationLists, reservationRules, startExcl, endExcl, depth, threadEvent, lastSharedDepth);
     if (stopAll) {
         if (stopAll == 2) {
             ReleaseSemaphore(semaphore, 1, NULL); // Release the semaphore
@@ -579,9 +570,8 @@ inline int updateThread(int reachedEnd, char* sort_info_path, char** sheetID, in
 	return 0;
 }
 
-inline int reallocVar(problemSt* problem, int** busyNodes, int n, GenericList** rests, ReservationList** reservationLists, ReservationRule** reservationRules, GenericList** startExcl, GenericList** endExcl, int** errors, Node* nodes, sharing** result, int* depth) {
+inline int reallocVar(int** busyNodes, int n, GenericList** rests, ReservationList** reservationLists, ReservationRule** reservationRules, GenericList** startExcl, GenericList** endExcl, int** errors, Node* nodes, sharing** result, int* depth) {
 	depth = 0;
-    problem->nb_process_on_it++;
     *busyNodes = malloc(n * sizeof(int));
     *rests = malloc(n * sizeof(GenericList));
     *reservationRules = malloc((n + 1) * sizeof(ReservationRule));
@@ -618,15 +608,14 @@ inline int reallocVar(problemSt* problem, int** busyNodes, int n, GenericList** 
     }
 }
 
-inline void waitForJob(HANDLE* semaphore, int* fstSharedDepth, int* nb_awaitingThrds, int* awaitingThrds, int rank, ThreadEvent* threadEvent, int* lastSharedDepth) {
+inline void waitForJob(HANDLE* semaphore, int* fstSharedDepth, int* nb_awaitingThrds, int* awaitingThrds, int rank, ThreadEvent* threadEvent, int* lastSharedDepth, char* sort_info_path, char** sheetID, int isCompleteSorting, int* befUpdErr, int* errorThrd, int* error, int* n, ThreadParams* allParams, sharing* result, sharerResult* sharers, int* nb_process, Node** nodes, int* stopAll, int* activeThrd, char** sheetPath, int* initBefUpdErr, int* prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, int* errors, int notMain, ThreadParams* paramP, int** busyNodes, GenericList** rests, ReservationList** reservationLists, ReservationRule** reservationRules, GenericList** startExcl, GenericList** endExcl, int* depth, ThreadEvent* threadEvents) {
     (*nb_awaitingThrds)++;
     awaitingThrds = realloc(awaitingThrds, *nb_awaitingThrds * sizeof(int));
     awaitingThrds[*nb_awaitingThrds] = rank;
     ReleaseSemaphore(semaphore, 1, NULL);
-    WaitForSingleObject(threadEvent[rank].eventHandlesThd, INFINITE);
+    WaitForSingleObject(threadEvent->eventHandlesThd, INFINITE);
     *lastSharedDepth = *fstSharedDepth;
 	WaitForSingleObject(semaphore, INFINITE);
-	modifyFile(1, toUpdate = 0);
 }
 
 // Recursive function to try all possible ways to sort the integer
@@ -645,7 +634,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 
     int rank = threadParamsRank->rank;
 
-	int lastSharedDepth = currentParams->fstSharedDepth;
+	int lastSharedDepth;
 	int ascending = 1;
     int found = 0;
     int currentElement;
@@ -683,8 +672,11 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
 
     int errorThrd;
     int initBefUpdErr;
+	int stopAll;
 
-	if (updateThread(sort_info_path, &sheetID, 0, semaphore, befUpdErr, &errorThrd, &depth, &lastSharedDepth, reservationLists, reservationRules, busyNodes, &ascending, error, &nb_awaitingThrds, &n, awaitingThrds, allParams, result, rank, sharers, &nb_process, threadEvent, rests, nodes, &activeThrd, sheetPath, &initBefUpdErr, &prbInd, allProblems, &nb_allProblems, &attributes, &nb_att, problem, &startExcl, &endExcl, &errors)) {
+    // int reachedEnd, char* sort_info_path, char** sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* rests, Node* nodes, int* activeThrd, char** sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, problemSt* problem, GenericList** startExcl, GenericList** endExcl, int** errors, int* stopAll, int notMain, int* fileCleaned, cJSON* waitingSheets, cJSON* sheetIDToBuffer, ThreadParams* paramP, int* fstSharedDepth, ThreadEvent* threadEvent
+
+	if (updateThread(0, sort_info_path, &sheetID, 0, semaphore, &befUpdErr, &errorThrd, &depth, &lastSharedDepth, reservationLists, reservationRules, busyNodes, &ascending, &error, &nb_awaitingThrds, &n, awaitingThrds, allParams, result, rank, sharers, &nb_process, threadEvent, rests, nodes, &activeThrd, &sheetPath, &initBefUpdErr, &prbInd, allProblems, &nb_allProblems, &attributes, &nb_att, problem, startExcl, endExcl, errors, &stopAll, 1, 0, )) {
 		return;
     }
     // main loop
@@ -694,7 +686,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
         if (ascending == 1) {
             depth++;
             if (depth == n) {
-				if (updateThread(sort_info_path, &sheetID, 1, semaphore, befUpdErr, &errorThrd, &depth, &lastSharedDepth, reservationLists, reservationRules, busyNodes, &ascending, error, &nb_awaitingThrds, &n, awaitingThrds, allParams, result, rank, sharers, &nb_process, threadEvent, rests, nodes, &activeThrd, sheetPath, &initBefUpdErr, &prbInd, allProblems, &nb_allProblems, &attributes, &nb_att, problem, &startExcl, &endExcl, &errors)) {
+				if (updateThread()) {
 					return;
 				}
 				ascending = 0;
@@ -784,7 +776,7 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
             if (depth == fstSharedDepth) {
 				sheetID = NULL;
             }
-            if ((!befUpdErr || !sheetID) && updateThread(sort_info_path, &sheetID, 0, semaphore, befUpdErr, &errorThrd, &depth, &lastSharedDepth, reservationLists, reservationRules, busyNodes, &ascending, error, &nb_awaitingThrds, &n, awaitingThrds, allParams, result, rank, sharers, &nb_process, threadEvent, rests, nodes, &activeThrd, sheetPath, &initBefUpdErr, &prbInd, allProblems, &nb_allProblems, &attributes, &nb_att, problem, &startExcl, &endExcl, &errors)) {
+            if ((!befUpdErr || !sheetID) && updateThread()) {
                 return;
             }
             if (n == 0) {
@@ -847,8 +839,10 @@ inline int giveJob(HANDLE* semaphore, int* awaitingThrds, int* nb_awaitingThrds,
     (*lastSharedDepth)++;
     ReleaseSemaphore(semaphore, 1, NULL);
     ThreadParams* otherParams = &allParams[otherRank];
-    if (strcmp(allProblems[otherParams->probInd].sheetID, sheetID)) {
-		otherParams->probInd = problem->prbInd;
+    if (otherParams->problem != problem) {
+		otherParams->problem = problem;
+		otherParams->result = realloc(otherParams->result, n * sizeof(sharing));
+		otherParams->sharers = realloc(otherParams->sharers, n * sizeof(sharerResult));
     }
     otherParams->fstSharedDepth = *lastSharedDepth;
     if (*lastSharedDepth > -1) {

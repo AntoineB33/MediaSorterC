@@ -70,7 +70,7 @@ typedef struct {
 } attributeSt;
 
 typedef struct {
-    int probInd;
+    problemSt* problem;
     int fstSharedDepth;
     sharing* result;
     sharerResult* sharers;
