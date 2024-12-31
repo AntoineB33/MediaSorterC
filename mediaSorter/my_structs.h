@@ -67,9 +67,9 @@ typedef struct {
 typedef struct {
     problemSt* problem;
     int fstSharedDepth;
+	int lstSharedDepth;
     sharing* result;
     int** sharers;
-    int sharer;
 } ThreadParams;
 
 typedef struct {

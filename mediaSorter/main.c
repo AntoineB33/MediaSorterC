@@ -146,7 +146,7 @@ inline int getNodes(char* sheetPath, Node* nodes, attributeSt* attributes, int* 
 	return 0;
 }
 
-inline void getPrevSort(char* sort_info_path, cJSON* bufferJS, int* nb_params, ThreadParams* allParams) {
+inline void getPrevSort(char* sort_info_path, cJSON* bufferJS, int* nb_params, ThreadParams* allParams, int n) {
     HANDLE hFile;
     OVERLAPPED ov;
     FILE* file;
@@ -159,11 +159,14 @@ inline void getPrevSort(char* sort_info_path, cJSON* bufferJS, int* nb_params, T
     cJSON* threadsArray = cJSON_GetObjectItem(bufferJS, "threads");
 	*nb_params = cJSON_GetArraySize(threadsArray);
 	allParams = malloc(*nb_params * sizeof(ThreadParams));
+	int** sharerRefs = malloc(*nb_params * sizeof(int*));
 	int i = 0;
 	cJSON* thread;
     cJSON_ArrayForEach(thread, threadsArray) {
+		cJSON* fstSharedDepth = cJSON_GetObjectItem(thread, "fstSharedDepth");
+		allParams[i].fstSharedDepth = fstSharedDepth->valueint;
         cJSON* resultJS = cJSON_GetObjectItem(thread, "result");
-		allParams[i].result = malloc(cJSON_GetArraySize(resultJS) * sizeof(sharing));
+		allParams[i].result = malloc(n * sizeof(sharing));
         int k = 0;
         cJSON* cJSONEl;
         cJSON_ArrayForEach(cJSONEl, resultJS) {
@@ -174,18 +177,28 @@ inline void getPrevSort(char* sort_info_path, cJSON* bufferJS, int* nb_params, T
             k++;
         }
         cJSON* sharersJS = cJSON_GetObjectItem(thread, "sharers");
-		allParams[i].sharers = malloc(cJSON_GetArraySize(sharersJS) * sizeof(sharerResult));
-        int k = 0;
-        cJSON* cJSONEl;
-        cJSON_ArrayForEach(cJSONEl, sharersJS) {
-            cJSON* sharerAtt = cJSON_GetObjectItem(cJSONEl, "sharer");
-            cJSON* resultAtt = cJSON_GetObjectItem(cJSONEl, "result");
-			allParams[i].sharers[k].sharer = sharerAtt->valueint;
-			allParams[i].sharers[k].result.result = resultAtt->valueint;
-            k++;
+		allParams[i].sharers = malloc(n * sizeof(int));
+		int array_size = cJSON_GetArraySize(sharersJS);
+		allParams[i].lstSharedDepth = allParams[i].fstSharedDepth + array_size - 1;
+		sharerRefs[i] = malloc(array_size * sizeof(int));
+        for (int k = 0; k < array_size; k++) {
+            cJSON* sharerAtt = cJSON_GetArrayItem(sharersJS, k);
+            sharerRefs[i][k] = sharerAtt->valueint;
         }
         i++;
     }
+    for (int i = 0; i < *nb_params; i++) {
+		for (int j = 0; j < allParams[i].lstSharedDepth - allParams[i].fstSharedDepth + 1; j++) {
+            int ind = sharerRefs[i][j];
+            if (ind != -1) {
+                int indToOther = j + allParams[i].lstSharedDepth - allParams[i].lstSharedDepth;
+                int k;
+                if (sharerRefs[i][indToOther] == -1 || ind > i) {
+                    allParams[i].sharers[j + allParams[i].lstSharedDepth] = &k;
+                }
+                sharerRefs[i][indToOther] = i;
+            }
+		}
     
 	cleanFile(&hFile, &ov, file, fileContent, json);
 }
