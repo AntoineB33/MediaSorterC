@@ -60,11 +60,6 @@ typedef struct {
 } sharing;
 
 typedef struct {
-    int sharer;
-    resultSt result;
-} sharerResult;
-
-typedef struct {
     int sep;
     int lastPlace;
 } attributeSt;
@@ -73,7 +68,8 @@ typedef struct {
     problemSt* problem;
     int fstSharedDepth;
     sharing* result;
-    sharerResult* sharers;
+    int** sharers;
+    int sharer;
 } ThreadParams;
 
 typedef struct {
@@ -89,17 +85,12 @@ typedef struct {
 } problemSt;
 
 typedef struct {
-    HANDLE hThread;
-    HANDLE eventHandlesThd;
-} ThreadEvent;
-
-typedef struct {
     const char* sort_info_path;
     problemSt* allProblems;
     int nb_allProblems;
     HANDLE* mainSemaphore;
     HANDLE* semaphore;
-    ThreadEvent* threadEvents;
+    HANDLE* threadEvents;
     int nb_process;
     int* awaitingThrds;
     int nb_awaitingThrds;
