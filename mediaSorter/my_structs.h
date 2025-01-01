@@ -64,6 +64,8 @@ typedef struct {
     int lastPlace;
 } attributeSt;
 
+typedef struct problemSt problemSt;
+
 typedef struct {
     problemSt* problem;
     int fstSharedDepth;
