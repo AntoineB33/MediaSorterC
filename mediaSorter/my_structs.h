@@ -60,6 +60,11 @@ typedef struct {
 } sharing;
 
 typedef struct {
+    resultSt result;
+    int* sharers;
+} sharingRef;
+
+typedef struct {
     int sep;
     int lastPlace;
 } attributeSt;
@@ -71,7 +76,7 @@ typedef struct {
     int fstSharedDepth;
 	int lstSharedDepth;
     sharing* result;
-    int** sharers;
+    sharingRef** sharers;
 } ThreadParams;
 
 typedef struct {

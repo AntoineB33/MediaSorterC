@@ -135,10 +135,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="getPrevSort.c" />
     <ClCompile Include="main.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="all_func.h" />
+    <ClInclude Include="getPrevSort.h" />
     <ClInclude Include="list_func.c" />
     <ClInclude Include="list_func.h" />
     <ClInclude Include="lock_unlock_files.c" />

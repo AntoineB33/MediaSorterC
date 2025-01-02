@@ -14,6 +14,7 @@
 #include <limits.h>
 #include "my_structs.h"
 #include "list_func.h"
+#include "getPrevSort.h"
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 

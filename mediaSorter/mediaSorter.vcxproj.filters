@@ -18,6 +18,9 @@
     <ClCompile Include="main.c">
       <Filter>Fichiers sources</Filter>
     </ClCompile>
+    <ClCompile Include="getPrevSort.c">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="all_func.h">
@@ -34,6 +37,9 @@
     </ClInclude>
     <ClInclude Include="lock_unlock_files.c">
       <Filter>Fichiers sources</Filter>
+    </ClInclude>
+    <ClInclude Include="getPrevSort.h">
+      <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
