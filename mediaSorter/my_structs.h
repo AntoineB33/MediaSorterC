@@ -89,6 +89,7 @@ typedef struct {
     int nb_process_on_it;
     ThreadParams* allParams;
     int nb_params;
+    int prbInd;
 } problemSt;
 
 typedef struct {

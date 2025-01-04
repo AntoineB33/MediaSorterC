@@ -15,6 +15,9 @@
 #include "my_structs.h"
 #include "list_func.h"
 #include "getPrevSort.h"
+#include "updateThrdAchiev.h"
+#include "lock_unlock_files.h"
+#include "threadSort.h"
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 

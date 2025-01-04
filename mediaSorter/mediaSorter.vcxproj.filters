@@ -21,6 +21,12 @@
     <ClCompile Include="getPrevSort.c">
       <Filter>Fichiers sources</Filter>
     </ClCompile>
+    <ClCompile Include="updateThrdAchiev.c">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
+    <ClCompile Include="threadSort.c">
+      <Filter>Fichiers sources</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="all_func.h">
@@ -39,6 +45,15 @@
       <Filter>Fichiers sources</Filter>
     </ClInclude>
     <ClInclude Include="getPrevSort.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="updateThrdAchiev.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="lock_unlock_files.h">
+      <Filter>Fichiers d%27en-tête</Filter>
+    </ClInclude>
+    <ClInclude Include="threadSort.h">
       <Filter>Fichiers d%27en-tête</Filter>
     </ClInclude>
   </ItemGroup>

@@ -1,7 +1,6 @@
 #include "all_func.h"
 
-
-inline int lockFile(HANDLE* hFile, OVERLAPPED* ov, const char* filePath) {
+int lockFile(HANDLE* hFile, OVERLAPPED* ov, const char* filePath) {
     *hFile = CreateFileA(
         filePath,
         GENERIC_READ | GENERIC_WRITE,
@@ -27,7 +26,7 @@ inline int lockFile(HANDLE* hFile, OVERLAPPED* ov, const char* filePath) {
     return 0;
 }
 
-inline void unlockFile(HANDLE* hFile, OVERLAPPED* ov) {
+void unlockFile(HANDLE* hFile, OVERLAPPED* ov) {
     UnlockFileEx(*hFile, 0, MAXDWORD, MAXDWORD, ov);
     CloseHandle(*hFile);
 }
