@@ -3,10 +3,10 @@
 
 
 
-void ifAscending(ThreadParamsRank* threadParamsRank) {
+void ifAscending(ThreadParamsRank* threadParamsRank, int* depth, int* ascending) {
     depth++;
     if (depth == n) {
-        if (updateThread(0, sort_info_path, &sheetID, 1, semaphore, &befUpdErr, &errorThrd, &depth, &lastSharedDepth, reservationLists, reservationRules, busyNodes, &ascending, &error, &nb_awaitingThrds, &n, awaitingThrds, allParams, result, rank, sharers, &nb_process, threadEvent, rests, nodes, &activeThrd, &sheetPath, &initBefUpdErr, &prbInd, allProblems, &nb_allProblems, &attributes, &nb_att, problem, startExcl, endExcl, errors, &stopAll, currentParam, &fstSharedDepth, threadEvent, meetPoint)) {
+        if (updateThread(0, 1, threadParamsRank)) {
             return;
         }
         ascending = 0;
@@ -130,26 +130,29 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
     int rank = threadParamsRank->rank;
 
     MeetPoint* meetPoint = threadParamsRank->meetPoint;
+
     char* sort_info_path = meetPoint->sort_info_path;
+    problemSt** allProblems = meetPoint->allProblems;
+    int nb_allProblems = meetPoint->nb_allProblems;
+	HANDLE* mainSemaphore = meetPoint->mainSemaphore;
     HANDLE* semaphore = meetPoint->semaphore;
     HANDLE* threadEvent = &meetPoint->threadEvents[rank];
     int nb_process = meetPoint->nb_process;
-    Node* nodes = nodes;
     int* awaitingThrds = meetPoint->awaitingThrds;
     int nb_awaitingThrds = meetPoint->nb_awaitingThrds;
     int* activeThrd = meetPoint->activeThrd;
+	int error = meetPoint->error;
+	ThreadParams* allParams = meetPoint->allParams;
+	int nb_params = meetPoint->nb_params;
 
-    problemSt** allProblems = meetPoint->allProblems;
-    int nb_allProblems = meetPoint->nb_allProblems;
-    int prbInd;
     problemSt* problem;
-    int* error;
+
+
+    int prbInd;
     char* sheetID;
     char* sheetPath;
     attributeSt* attributes;
     int nb_att;
-    ThreadParams* allParams = meetPoint->allParams;
-    int nb_params = meetPoint->nb_params;
 
     ThreadParams* currentParam = &allParams[rank];
     int fstSharedDepth = currentParam->fstSharedDepth - 1;
@@ -176,12 +179,12 @@ DWORD WINAPI threadSort(LPVOID lpParam) {
     int stopAll;
     int reachedEnd;
 
-    if (updateThread(0, sort_info_path, &sheetID, 0, semaphore, &befUpdErr, &errorThrd, &depth, &lastSharedDepth, reservationLists, reservationRules, busyNodes, &ascending, &error, &nb_awaitingThrds, &n, awaitingThrds, allParams, result, rank, sharers, &nb_process, threadEvent, rests, nodes, &activeThrd, &sheetPath, &initBefUpdErr, &prbInd, allProblems, &nb_allProblems, &attributes, &nb_att, problem, startExcl, endExcl, errors, &stopAll, currentParam, &fstSharedDepth, threadEvent, meetPoint)) {
+    if (updateThread(0, 0, threadParamsRank)) {
         return;
     }
     // main loop
     while (1) {
-        chooseNextOpt(depth, &lastSharedDepth, semaphore, result, sharers, reservationRules, reservationLists, rests, &ascending, nodes, busyNodes, errors, allParams);
+        chooseNextOpt(threadParamsRank);
         if (ascending == 1) {
 			ifAscending(threadParamsRank);
         }

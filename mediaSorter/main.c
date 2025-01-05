@@ -353,6 +353,9 @@ inline int modifyFile(int reachedEnd, char* sort_info_path, char** sheetID, int 
 						free(allParams[i].sharers);
                     }
                 }
+                if (!new_nb_process_temp) {
+					SetEvent(meetPoint->mainSemaphore);
+                }
             }
             for (int i = 0; i < *nb_awaitingThrds; i++) {
                 if (awaitingThrds[i] >= new_nb_process) {
@@ -476,7 +479,7 @@ inline int updateBefUpd(int* errorThrd, int* errors, int n, int* error, int* ini
     errorThrd = *error;
 }
 
-inline int updateThread(int reachedEnd, char* sort_info_path, char** sheetID, int isCompleteSorting, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* rests, Node* nodes, int** activeThrd, char** sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, problemSt* problem, GenericList** startExcl, GenericList** endExcl, int** errors, int* stopAll, ThreadParams* paramP, int* fstSharedDepth, ThreadEvent* threadEvent, MeetPoint* meetPoint) {
+int updateThread(int reachedEnd, int isCompleteSorting, char* sort_info_path, char** sheetID, HANDLE* semaphore, int* befUpdErr, int* errorThrd, int* depth, int* lastSharedDepth, ReservationList* reservationLists, ReservationRule* reservationRules, int* busyNodes, int* ascending, int* error, int* nb_awaitingThrds, int* n, int* awaitingThrds, ThreadParams* allParams, sharing* result, int rank, sharerResult* sharers, int* nb_process, ThreadEvent* threadEvents, GenericList* rests, Node* nodes, int** activeThrd, char** sheetPath, int* initBefUpdErr, int prbInd, problemSt** allProblems, int* nb_allProblems, attributeSt** attributes, int* nb_att, problemSt* problem, GenericList** startExcl, GenericList** endExcl, int** errors, int* stopAll, ThreadParams* paramP, int* fstSharedDepth, ThreadEvent* threadEvent, MeetPoint* meetPoint) {
     WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
     int stopAll;
     modifyFile(reachedEnd, sort_info_path, sheetID, isCompleteSorting, semaphore, befUpdErr, errorThrd, error, nb_awaitingThrds, n, allParams, result, rank, sharers, nb_process, threadEvents, nodes, stopAll, activeThrd, sheetPath, initBefUpdErr, prbInd, allProblems, nb_allProblems, attributes, nb_att, errors, 1, awaitingThrds, paramP, fstSharedDepth, busyNodes, rests, reservationLists, reservationRules, startExcl, endExcl, depth, threadEvent, lastSharedDepth, meetPoint);
@@ -544,7 +547,7 @@ inline void waitForJob(HANDLE* semaphore, int* fstSharedDepth, int* nb_awaitingT
 	WaitForSingleObject(semaphore, INFINITE);
 }
 
-inline void chg_nb_process(int* nb_process, ThreadParams* allParams, HANDLE* threadEvents, int new_nb_process, int** activeThrd, MeetPoint* meetPoint, int rank) {
+void chg_nb_process(int* nb_process, ThreadParams* allParams, HANDLE* threadEvents, int new_nb_process, int** activeThrd, MeetPoint* meetPoint, int rank) {
     *activeThrd = realloc(*activeThrd, new_nb_process * sizeof(int));
     for (int i = *nb_process; i < new_nb_process; i++) {
         (*activeThrd)[i] = 0;
