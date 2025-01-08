@@ -21,4 +21,6 @@
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
 
+
+
 #endif /* STRING_UTILS_H */

@@ -98,7 +98,7 @@ typedef struct {
     int nb_allProblems;
     HANDLE* mainSemaphore;
     HANDLE* semaphore;
-    HANDLE* threadEvents;
+    HANDLE** threadEvents;
     int nb_process;
     int* awaitingThrds;
     int nb_awaitingThrds;
@@ -125,3 +125,47 @@ typedef struct {
 } Element;
 
 #endif // MY_STRUCTS_H
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Group parameters into a single struct
+typedef struct {
+    ThreadParamsRank* threadParamsRank;
+    GenericList** rests;
+    GenericList** startExcl;
+    GenericList** endExcl;
+    ReservationList** reservationLists;
+    ReservationRule** reservationRules;
+    int** busyNodes;
+    int** errors;
+    int* depth;
+    int* ascending;
+    int* lastSharedDepth;
+    int* errorThrd;
+    int* befUpdErr;
+    int* initBefUpdErr;
+	int notMain;
+	int reachedEnd;
+	int isCompleteSorting;
+    HANDLE hFile;
+    OVERLAPPED ov;
+    FILE* file;
+    char* fileContent;
+    cJSON* json;
+    cJSON* waitingSheets;
+    cJSON* sheetIDToBuffer;
+    int* fileCleaned;
+} IfAscendingParams;
