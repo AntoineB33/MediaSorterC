@@ -18,9 +18,9 @@ void ifAscending(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -45,7 +45,7 @@ void ifAscending(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -61,13 +61,16 @@ void ifAscending(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     (*depth)++;
     if (*depth == n) {
-        if (updateThread(ifAscendingParams, 0, 1)) {
+		*isCompleteSorting = 1;
+		*reachedEnd = 1;
+		int res = updateThread(ifAscendingParams);
+        *reachedEnd = 0;
+        if (res) {
             return;
         }
         ascending = 0;
@@ -165,9 +168,9 @@ void ifDescending(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -192,7 +195,7 @@ void ifDescending(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -208,16 +211,15 @@ void ifDescending(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     *ascending = 1;
     (*result)[*depth].result.result = -1;
     (*depth)--;
     (*befUpdErr)--;
-    reachedEnd = *depth == *fstSharedDepth;
-    if ((!*befUpdErr || reachedEnd) && updateThread(ifAscendingParams, reachedEnd, 0)) {
+    *reachedEnd = *depth == *fstSharedDepth;
+    if ((!*befUpdErr || *reachedEnd) && updateThread(ifAscendingParams)) {
         return;
     }
     if (n == 0) {
@@ -225,7 +227,7 @@ void ifDescending(IfAscendingParams* ifAscendingParams) {
     }
     int nodId = (*result)[*depth].nodeId;
     (*nodes)[nodId].nbPost--;
-    notChosenAnymore(nodes, reservationRules, reservationLists, nodId);
+    notChosenAnymore(ifAscendingParams, nodId);
     for (int j = 0; j < (*nodes)[nodId].nb_ulteriors; j++) {
         int ulterior = ((int*)(*nodes)[nodId].nb_ulteriors)[j];
         (*nodes)[ulterior].nbPost++;
@@ -243,86 +245,59 @@ void ifDescending(IfAscendingParams* ifAscendingParams) {
 
 // Recursive function to try all possible ways to sort the integer
 DWORD WINAPI threadSort(LPVOID lpParam) {
-    int ascending = 1;
-    int depth = 0;
-    int n;
     // Cast lpParam to the appropriate structure type
     ThreadParamsRank* threadParamsRank = (ThreadParamsRank*)lpParam;
 
-    int rank = threadParamsRank->rank;
-
-    MeetPoint* meetPoint = threadParamsRank->meetPoint;
-
-    char* sort_info_path = meetPoint->sort_info_path;
-    problemSt** allProblems = meetPoint->allProblems;
-    int nb_allProblems = meetPoint->nb_allProblems;
-	HANDLE* mainSemaphore = meetPoint->mainSemaphore;
-    HANDLE* semaphore = meetPoint->semaphore;
-    HANDLE* threadEvent = &meetPoint->threadEvents[rank];
-    int nb_process = meetPoint->nb_process;
-    int* awaitingThrds = meetPoint->awaitingThrds;
-    int nb_awaitingThrds = meetPoint->nb_awaitingThrds;
-    int* activeThrd = meetPoint->activeThrd;
-	int error = meetPoint->error;
-	ThreadParams* allParams = meetPoint->allParams;
-	int nb_params = meetPoint->nb_params;
-
-	ThreadParams* currentParam = &allParams[rank];
-
-
-    int prbInd;
-    char* sheetID;
-    char* sheetPath;
-    attributeSt* attributes;
-    int nb_att;
-
-    ThreadParams* currentParam = &allParams[rank];
-    int fstSharedDepth = currentParam->fstSharedDepth - 1;
-    sharing* result = currentParam->result;
-    int** sharers = currentParam->sharers;
-
-    int lastSharedDepth;
-    int found = 0;
-    int currentElement;
-    int befUpdErr;
-    int startInd = 0;
-
-    int* const busyNodes = NULL;
     GenericList* const rests = NULL;
-    ReservationRule* const reservationRules = NULL;
-    ReservationList* const reservationLists = NULL;
     GenericList* startExcl = NULL;
     GenericList* endExcl = NULL;
+    ReservationList* const reservationLists = NULL;
+    ReservationRule* const reservationRules = NULL;
+    int* busyNodes = NULL;
     int* errors = NULL;
-    int errorThrd;
+	int depth = 0;
+    int _ascending = 1;
+	int lastSharedDepth;
+	int errorThrd;
+	int befUpdErr;
+	int initBefUpdErr;
+	int reachedEnd;
+	int isCompleteSorting;
 
-    int errorThrd;
-    int initBefUpdErr;
-    int stopAll;
-    int reachedEnd;
+    IfAscendingParams ifAscendingParams = {
+        .threadParamsRank = threadParamsRank,
+        .rests = &rests,
+        .startExcl = &startExcl,
+        .endExcl = &endExcl,
+        .reservationLists = &reservationLists,
+        .reservationRules = &reservationRules,
+        .busyNodes = &busyNodes,
+		.errors = &errors,
+        .depth = &depth,
+        .ascending = &_ascending,
+		.lastSharedDepth = &lastSharedDepth,
+		.errorThrd = &errorThrd,
+		.befUpdErr = &befUpdErr,
+		.initBefUpdErr = &initBefUpdErr,
+		.reachedEnd = &reachedEnd,
+		.isCompleteSorting = &isCompleteSorting,
+		.notMain = 0,
+    };
 
-    if (updateThread(threadParamsRank, 0, 0)) {
+    if (updateThread(&ifAscendingParams)) {
         return;
     }
+
+	int* ascending = ifAscendingParams.ascending;
+
     // main loop
     while (1) {
-        chooseNextOpt(threadParamsRank, &depth, &ascending);
-        if (ascending == 1) {
-			IfAscendingParams ifAscendingParams = {
-				.threadParamsRank = threadParamsRank,
-				.rests = rests,
-				.startExcl = startExcl,
-				.endExcl = endExcl,
-				.reservationLists = reservationLists,
-				.reservationRules = reservationRules,
-				.busyNodes = busyNodes,
-				.depth = &depth,
-				.ascending = &ascending,
-			};
-			ifAscending(ifAscendingParams);
+        chooseNextOpt(&ifAscendingParams);
+        if (*ascending) {
+			ifAscending(&ifAscendingParams);
         }
-        if (ascending == 0) {
-			ifDescending(threadParamsRank, &depth, &ascending);
+        if (!*ascending) {
+			ifDescending(&ifAscendingParams);
         }
     }
 }

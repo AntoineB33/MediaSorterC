@@ -15,9 +15,9 @@ void updateThrdAchiev(IfAscendingParams* ifAscendingParams, cJSON* json, cJSON* 
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
 
     int rank = threadParamsRank->rank;
     MeetPoint* meetPoint = threadParamsRank->meetPoint;
@@ -34,7 +34,7 @@ void updateThrdAchiev(IfAscendingParams* ifAscendingParams, cJSON* json, cJSON* 
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -50,9 +50,8 @@ void updateThrdAchiev(IfAscendingParams* ifAscendingParams, cJSON* json, cJSON* 
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     cJSON* sheetPathToSheetID = cJSON_GetObjectItem(json, "sheetPathToSheetID");
     cJSON* sheetIDJS = cJSON_GetObjectItem(sheetPathToSheetID, *sheetPath);
@@ -63,7 +62,8 @@ void updateThrdAchiev(IfAscendingParams* ifAscendingParams, cJSON* json, cJSON* 
     cJSON* bufferJS = cJSON_GetObjectItemCaseSensitive(sheetIDToBuffer, *sheetID);
     cJSON* toUpdateJS = cJSON_GetObjectItem(bufferJS, "toUpdate");
     toUpdate = toUpdateJS->valueint;
-    if (isCompleteSorting) {
+    if (*isCompleteSorting) {
+		*isCompleteSorting = 0;
         cJSON* errorJS = cJSON_GetObjectItem(bufferJS, "error");
         cJSON_ReplaceItemInObject(bufferJS, "error", cJSON_CreateNumber(*error));
         cJSON* resultNodesArray = cJSON_GetObjectItem(bufferJS, "resultNodes");
@@ -101,7 +101,7 @@ void updateThrdAchiev(IfAscendingParams* ifAscendingParams, cJSON* json, cJSON* 
         }
     }
 	cJSON_AddItemToObject(thread, "fstSharedDepth", cJSON_CreateNumber(*fstSharedDepth));
-	cJSON_AddArrayToObject(thread, "lstSharedDepth", cJSON_CreateNumber(*lstSharedDepth));
+    cJSON_AddItemToObject(thread, "lstSharedDepth", cJSON_CreateNumber(*lstSharedDepth));
     cJSON_AddItemToObject(thread, "resultArray", resultArray);
 	cJSON_AddItemToObject(thread, "sharersArray", sharersArray);
     // remove sharerRefs

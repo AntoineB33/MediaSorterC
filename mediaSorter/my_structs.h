@@ -24,7 +24,7 @@ typedef struct {
     int nb_ulteriors;
     char** conditions;	   // List of conditions that must be satisfied
     int nb_conditions;
-    Node** groups;
+    struct Node** groups;
     int nb_groups;
     allowedPlaceSt* allowedPlaces;
     int nb_allowedPlaces;
@@ -69,10 +69,8 @@ typedef struct {
     int lastPlace;
 } attributeSt;
 
-typedef struct problemSt problemSt;
-
 typedef struct {
-    problemSt* problem;
+    struct problemSt* problem;
     int fstSharedDepth;
 	int lstSharedDepth;
     sharing* result;
@@ -87,7 +85,7 @@ typedef struct {
     attributeSt* attributes;
     int nb_att;
     int nb_process_on_it;
-    ThreadParams* allParams;
+    ThreadParams* allWaitingParams;
     int nb_params;
     int prbInd;
 } problemSt;
@@ -105,7 +103,6 @@ typedef struct {
     int* activeThrd;
     int error;
     ThreadParams* allParams;
-    int nb_params;
 } MeetPoint;
 
 typedef struct {
@@ -157,9 +154,9 @@ typedef struct {
     int* errorThrd;
     int* befUpdErr;
     int* initBefUpdErr;
+	int* reachedEnd;
+	int* isCompleteSorting;
 	int notMain;
-	int reachedEnd;
-	int isCompleteSorting;
     HANDLE hFile;
     OVERLAPPED ov;
     FILE* file;

@@ -137,11 +137,14 @@
   <ItemGroup>
     <ClCompile Include="getPrevSort.c" />
     <ClCompile Include="main.c" />
+    <ClCompile Include="test.c" />
+    <ClCompile Include="test2.c" />
     <ClCompile Include="threadSort.c" />
     <ClCompile Include="updateThrdAchiev.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="all_func.h" />
+    <ClInclude Include="common_includes.h" />
     <ClInclude Include="getPrevSort.h" />
     <ClInclude Include="list_func.c" />
     <ClInclude Include="list_func.h" />

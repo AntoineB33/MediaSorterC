@@ -17,9 +17,9 @@ void notChosenAnymore(IfAscendingParams* ifAscendingParams, int nodeId) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -44,7 +44,7 @@ void notChosenAnymore(IfAscendingParams* ifAscendingParams, int nodeId) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -60,9 +60,8 @@ void notChosenAnymore(IfAscendingParams* ifAscendingParams, int nodeId) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
 	Node* node = &(*nodes)[nodeId];
     if (node->nb_allowedPlaces) {
@@ -120,9 +119,9 @@ int check_conditions(IfAscendingParams* ifAscendingParams, Node* node) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -147,7 +146,7 @@ int check_conditions(IfAscendingParams* ifAscendingParams, Node* node) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -163,9 +162,8 @@ int check_conditions(IfAscendingParams* ifAscendingParams, Node* node) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
 	int is_true = 1;
     char* condition;
@@ -203,9 +201,9 @@ int getNodes(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -230,7 +228,7 @@ int getNodes(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -246,9 +244,8 @@ int getNodes(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     // Allocate memory for the full file path
     size_t filePathSize = strlen(infoFolder) + strlen(*sheetPath) + strlen(".txt") + 1;
@@ -311,7 +308,7 @@ int getNodes(IfAscendingParams* ifAscendingParams) {
 	cJSON* attributesArray = cJSON_GetObjectItem(json, "attributes");
 	*nb_att = cJSON_GetArraySize(attributesArray);
 	*attributes = malloc(*nb_att * sizeof(attributeSt));
-	int i = 0;
+	i = 0;
 	cJSON* attribute;
 	cJSON_ArrayForEach(attribute, attributesArray) {
         (*attributes)[i].lastPlace = -1;
@@ -323,14 +320,15 @@ int getNodes(IfAscendingParams* ifAscendingParams) {
 	return 0;
 }
 
-inline int openTxtFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, char* file_path) {
+int openTxtFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, char* file_path) {
     if (lockFile(hFile, ov, file_path)) {
         return -1;
     }
 
     // Open the file for reading
-    file = fopen(file_path, "r");
-    if (!file) {
+    errno_t err;
+    err = fopen_s(&file, file_path, "r");
+    if (err) {
         printf("Failed to open file for reading: %s\n", file_path);
         return -1;
     }
@@ -360,7 +358,8 @@ inline int openTxtFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileCont
     return 0;
 }
 
-inline void cleanFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, const char* file_path) {
+void cleanFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileContent, cJSON* json, const char* file_path) {
+	test2(&hFile, ov);
     if (json) {
         // Serialize the JSON object to a string
         char* updatedContent = cJSON_Print(json);
@@ -369,8 +368,9 @@ inline void cleanFile(HANDLE* hFile, OVERLAPPED* ov, FILE* file, char* fileConte
         }
         else {
             // Reopen the file in write mode to update it
-            file = fopen(file_path, "w");
-            if (!file) {
+			errno_t err;
+            err = fopen_s(&file, file_path, "w");
+            if (err) {
                 printf("Failed to open file for writing: %s\n", file_path);
             }
             else {
@@ -414,9 +414,9 @@ void chkIfSameSheetID(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -441,7 +441,6 @@ void chkIfSameSheetID(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -457,41 +456,38 @@ void chkIfSameSheetID(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     if (!cJSON_GetArraySize(waitingSheets) || cJSON_GetObjectItem(json, "stop")->valueint) {
         (*activeThrd)[rank] = 0;
+		*sheetID = NULL;
 		*n = 0;
     }
 
     cJSON* waitingSheet = cJSON_GetArrayItem(waitingSheets, 0);
     int diff_sheet = !*sheetID || strcmp(waitingSheet->valuestring, *sheetID);
-    if (!*sheetID || diff_sheet || !*n || reachedEnd) {
+    if (!*sheetID || diff_sheet || *reachedEnd) {
         if (*sheetID && diff_sheet) {
             (*allProblems)[*prbInd].nb_process_on_it--;
             if (!(*allProblems)[*prbInd].nb_process_on_it) {
                 // Remove a Problem (because this thread was the last one to work on it)
                 for (int i = 0; i < (*allProblems)[*prbInd].nb_params; i++) {
-                    free((*allProblems)[*prbInd].allParams[i].result);
-                    free((*allProblems)[*prbInd].allParams[i].sharers);
+                    free((*allProblems)[*prbInd].allWaitingParams[i].result);
+                    free((*allProblems)[*prbInd].allWaitingParams[i].sharers);
                 }
-                free((*allProblems)[*prbInd].allParams);
+                free((*allProblems)[*prbInd].allWaitingParams);
                 removeInd(*allProblems, *nb_allProblems, *prbInd, sizeof(problemSt));
 				for (int i = *prbInd; i < *nb_allProblems; i++) {
 					(*allProblems)[i].prbInd--;
 				}
             }
         }
-        if (!*n) {
-            return;
-        }
         int fstThrdOnPb = 0;
-        if (diff_sheet) {
+        if (diff_sheet && *n) {
             int found = 0;
             *sheetID = realloc(*sheetID, strlen(waitingSheet->valuestring) + 1);
-            strcpy(*sheetID, waitingSheet->valuestring);
+            strcpy_s(*sheetID, strlen(waitingSheet->valuestring), waitingSheet->valuestring);
             for (int i = 0; i < *nb_allProblems; i++) {
                 if (strcmp((*allProblems)[i].sheetID, *sheetID)) {
                     *prbInd = i;
@@ -514,9 +510,30 @@ void chkIfSameSheetID(IfAscendingParams* ifAscendingParams) {
             *attributes = &(*allProblems)[*prbInd].attributes;
             *n = (*allProblems)[*prbInd].n;
             *nb_att = &(*allProblems)[*prbInd].nb_att;
-			reallocVar(ifAscendingParams);
             *initBefUpdErr = fstNbItBefUpdErr;
         }
+        if (*sheetID) {
+            reallocVar(ifAscendingParams);
+        }
+        else {
+			free(*busyNodes);
+			free(*rests);
+			free(*reservationRules);
+			free(*reservationLists);
+			free(*startExcl);
+			free(*endExcl);
+			free(*errors);
+			free(*result);
+			for (int i = 0; i <= *n; i++) {
+				freeList(&(*rests)[i]);
+			}
+			for (int i = 0; i < *n - 1; i++) {
+				freeList(&((*reservationLists)[i].data));
+			}
+        }
+		if (!*n) {
+			return;
+		}
         int paramInd = (*allProblems)[*prbInd].nb_params - 1;
         if (paramInd == -1) {
             cleanFile(&hFile, &ov, file, fileContent, json, *sort_info_path);
@@ -524,9 +541,9 @@ void chkIfSameSheetID(IfAscendingParams* ifAscendingParams) {
 			*fileCleaned = 1;
         }
         else {
-			*result = (*allProblems)[*prbInd].allParams[paramInd].result;
-			*sharers = (*allProblems)[*prbInd].allParams[paramInd].sharers;
-            *fstSharedDepth = (*allProblems)[*prbInd].allParams[paramInd].fstSharedDepth;
+			*result = (*allProblems)[*prbInd].allWaitingParams[paramInd].result;
+			*sharers = (*allProblems)[*prbInd].allWaitingParams[paramInd].sharers;
+            *fstSharedDepth = (*allProblems)[*prbInd].allWaitingParams[paramInd].fstSharedDepth;
             (*nb_allProblems)--;
             *allProblems = realloc(*allProblems, *nb_allProblems * sizeof(problemSt));
         }
@@ -534,7 +551,7 @@ void chkIfSameSheetID(IfAscendingParams* ifAscendingParams) {
 }
 
 // Function to search and modify the content in the file
-inline int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
+int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
     ThreadParamsRank* threadParamsRank = ifAscendingParams->threadParamsRank;
     GenericList** rests = ifAscendingParams->rests;
     GenericList** startExcl = ifAscendingParams->startExcl;
@@ -549,9 +566,9 @@ inline int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
 	HANDLE hFile = ifAscendingParams->hFile;
 	OVERLAPPED ov = ifAscendingParams->ov;
 	FILE* file = ifAscendingParams->file;
@@ -576,7 +593,7 @@ inline int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
 	int** activeThrd = &meetPoint->activeThrd;
 	int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-	int* nb_params = &meetPoint->nb_params;
+	
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -592,20 +609,19 @@ inline int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
 	attributeSt** attributes = &problem->attributes;
 	int* nb_att = &problem->nb_att;
 	int* prbInd = &problem->prbInd;
-	ThreadParams** allParams = &problem->allParams;
+	ThreadParams** allWaitingParams = &problem->allWaitingParams;
 	int* nb_params = &problem->nb_params;
-	int* prbInd = &problem->prbInd;
 
 	if (openTxtFile(&hFile, &ov, file, fileContent, json, *sort_info_path)) {
 		return -1;
 	}
 
-    cJSON* waitingSheets = cJSON_GetObjectItem(json, "waitingSheets");
-    cJSON* sheetIDToBuffer = cJSON_GetObjectItem(json, "sheetIDToBuffer");
+    waitingSheets = cJSON_GetObjectItem(json, "waitingSheets");
+    sheetIDToBuffer = cJSON_GetObjectItem(json, "sheetIDToBuffer");
 
 
     if (notMain && *error) {
-        updateBefUpd(ifAscendingParams, stopAll);
+        updateBefUpd(ifAscendingParams);
         if (*sheetID) {
             updateThrdAchiev(ifAscendingParams, json, sheetIDToBuffer);
         }
@@ -648,6 +664,8 @@ inline int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
 					removeInd(*awaitingThrds, nb_awaitingThrds, i, sizeof(int));
 				}
 			}
+			*sheetID = NULL;
+			modifyFile(ifAscendingParams, stopAll);
 		}
 	}
 	chg_nb_process(ifAscendingParams, new_nb_process_temp);
@@ -657,7 +675,7 @@ inline int modifyFile(IfAscendingParams* ifAscendingParams, int* stopAll) {
     return 0;
 }
 
-inline void chooseWithResRules(IfAscendingParams* ifAscendingParams) {
+void chooseWithResRules(IfAscendingParams* ifAscendingParams) {
     ThreadParamsRank* threadParamsRank = ifAscendingParams->threadParamsRank;
     GenericList** rests = ifAscendingParams->rests;
     GenericList** startExcl = ifAscendingParams->startExcl;
@@ -672,9 +690,9 @@ inline void chooseWithResRules(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -699,7 +717,7 @@ inline void chooseWithResRules(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -715,9 +733,8 @@ inline void chooseWithResRules(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     int placeInd;
     int choiceInd;
@@ -754,16 +771,7 @@ inline void chooseWithResRules(IfAscendingParams* ifAscendingParams) {
     }
 }
 
-inline void updateErrors(sharing* result, Node* node, int* errors, int depth) {
-    for (int condInd = 0; condInd < node->nb_errorFunctions; condInd++) {
-        errors[depth] += 1;
-    }
-    for (int i = 0; i < node->nb_groups; i++) {
-        updateErrors(result, node->groups[i], errors, depth);
-    }
-}
-
-void chooseNextOpt(IfAscendingParams* ifAscendingParams, int* stopAll) {
+void updateErrors(IfAscendingParams* ifAscendingParams, Node* node) {
     ThreadParamsRank* threadParamsRank = ifAscendingParams->threadParamsRank;
     GenericList** rests = ifAscendingParams->rests;
     GenericList** startExcl = ifAscendingParams->startExcl;
@@ -778,9 +786,9 @@ void chooseNextOpt(IfAscendingParams* ifAscendingParams, int* stopAll) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -805,7 +813,7 @@ void chooseNextOpt(IfAscendingParams* ifAscendingParams, int* stopAll) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -821,9 +829,77 @@ void chooseNextOpt(IfAscendingParams* ifAscendingParams, int* stopAll) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
+
+    for (int condInd = 0; condInd < node->nb_errorFunctions; condInd++) {
+        (*errors)[*depth] += 1;
+    }
+    for (int i = 0; i < node->nb_groups; i++) {
+        updateErrors(ifAscendingParams, node->groups[i]);
+    }
+}
+
+void chooseNextOpt(IfAscendingParams* ifAscendingParams) {
+    ThreadParamsRank* threadParamsRank = ifAscendingParams->threadParamsRank;
+    GenericList** rests = ifAscendingParams->rests;
+    GenericList** startExcl = ifAscendingParams->startExcl;
+    GenericList** endExcl = ifAscendingParams->endExcl;
+    ReservationList** reservationLists = ifAscendingParams->reservationLists;
+    ReservationRule** reservationRules = ifAscendingParams->reservationRules;
+    int** busyNodes = ifAscendingParams->busyNodes;
+    int** errors = ifAscendingParams->errors;
+    int* depth = ifAscendingParams->depth;
+    int* ascending = ifAscendingParams->ascending;
+    int* lastSharedDepth = ifAscendingParams->lastSharedDepth;
+    int* errorThrd = ifAscendingParams->errorThrd;
+    int* befUpdErr = ifAscendingParams->befUpdErr;
+    int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
+    int notMain = ifAscendingParams->notMain;
+    HANDLE hFile = ifAscendingParams->hFile;
+    OVERLAPPED ov = ifAscendingParams->ov;
+    FILE* file = ifAscendingParams->file;
+    char* fileContent = ifAscendingParams->fileContent;
+    cJSON* json = ifAscendingParams->json;
+    cJSON* waitingSheets = ifAscendingParams->waitingSheets;
+    cJSON* sheetIDToBuffer = ifAscendingParams->sheetIDToBuffer;
+    int* fileCleaned = ifAscendingParams->fileCleaned;
+
+    int rank = threadParamsRank->rank;
+    MeetPoint* meetPoint = threadParamsRank->meetPoint;
+
+    char** sort_info_path = &meetPoint->sort_info_path;
+    problemSt** allProblems = &meetPoint->allProblems;
+    int* nb_allProblems = &meetPoint->nb_allProblems;
+    HANDLE* mainSemaphore = meetPoint->mainSemaphore;
+    HANDLE* semaphore = meetPoint->semaphore;
+    HANDLE*** threadEvents = &meetPoint->threadEvents;
+    int* nb_process = &meetPoint->nb_process;
+    int** awaitingThrds = &meetPoint->awaitingThrds;
+    int* nb_awaitingThrds = &meetPoint->nb_awaitingThrds;
+    int** activeThrd = &meetPoint->activeThrd;
+    int* error = &meetPoint->error;
+    ThreadParams** allParams = &meetPoint->allParams;
+    
+
+    ThreadParams* currentParam = allParams[rank];
+    problemSt* problem = currentParam->problem;
+    int* fstSharedDepth = &currentParam->fstSharedDepth;
+    int* lstSharedDepth = &currentParam->lstSharedDepth;
+    sharing** result = currentParam->result;
+    sharingRef*** sharers = currentParam->sharers;
+
+    char** sheetPath = &problem->sheetPath;
+    char** sheetID = &problem->sheetID;
+    Node** nodes = &problem->nodes;
+    int* n = &problem->n;
+    attributeSt** attributes = &problem->attributes;
+    int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
+    int* nb_params = &problem->nb_params;
 
     // if the tree is shared with another thread at this depth
     if (*depth == *lastSharedDepth) {
@@ -845,10 +921,10 @@ void chooseNextOpt(IfAscendingParams* ifAscendingParams, int* stopAll) {
         } while (1);
     }
     else {
-		chooseWithResRules(result, depth, reservationRules, reservationLists, busyNodes, nodes, ascending);
+		chooseWithResRules(ifAscendingParams);
     }
 
-	updateErrors(result, &nodes[(*result)[*depth].nodeId], errors, depth);
+	updateErrors(ifAscendingParams, &nodes[(*result)[*depth].nodeId]);
 
     // if the tree is shared with another thread at this depth
     if (*depth == *lastSharedDepth) {
@@ -862,7 +938,7 @@ void chooseNextOpt(IfAscendingParams* ifAscendingParams, int* stopAll) {
     }
 }
 
-int updateBefUpd(IfAscendingParams* ifAscendingParams, int* stopAll) {
+int updateBefUpd(IfAscendingParams* ifAscendingParams) {
     const int incremBefUpdErr = 50;
     const int initBefUpdErrMax = 10000;
     const int initBefUpdErrMin = 50;
@@ -882,9 +958,9 @@ int updateBefUpd(IfAscendingParams* ifAscendingParams, int* stopAll) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -909,7 +985,7 @@ int updateBefUpd(IfAscendingParams* ifAscendingParams, int* stopAll) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -925,9 +1001,8 @@ int updateBefUpd(IfAscendingParams* ifAscendingParams, int* stopAll) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     if (*errorThrd != *error || *nb_awaitingThrds > 0) {
         if (initBefUpdErr - incremBefUpdErr >= initBefUpdErrMin) {
@@ -944,7 +1019,7 @@ int updateBefUpd(IfAscendingParams* ifAscendingParams, int* stopAll) {
     *errorThrd = *error;
 }
 
-int updateThread(IfAscendingParams* ifAscendingParams, int reachedEnd, int isCompleteSorting) {
+int updateThread(IfAscendingParams* ifAscendingParams) {
     ThreadParamsRank* threadParamsRank = ifAscendingParams->threadParamsRank;
     GenericList** rests = ifAscendingParams->rests;
     GenericList** startExcl = ifAscendingParams->startExcl;
@@ -959,9 +1034,9 @@ int updateThread(IfAscendingParams* ifAscendingParams, int reachedEnd, int isCom
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -986,7 +1061,7 @@ int updateThread(IfAscendingParams* ifAscendingParams, int reachedEnd, int isCom
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -1002,9 +1077,8 @@ int updateThread(IfAscendingParams* ifAscendingParams, int reachedEnd, int isCom
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     WaitForSingleObject(semaphore, INFINITE); // Acquire the semaphore
     int stopAll;
@@ -1025,7 +1099,7 @@ int updateThread(IfAscendingParams* ifAscendingParams, int reachedEnd, int isCom
 	return 0;
 }
 
-inline int reallocVar(IfAscendingParams* ifAscendingParams) {
+int reallocVar(IfAscendingParams* ifAscendingParams) {
     ThreadParamsRank* threadParamsRank = ifAscendingParams->threadParamsRank;
     GenericList** rests = ifAscendingParams->rests;
     GenericList** startExcl = ifAscendingParams->startExcl;
@@ -1040,9 +1114,9 @@ inline int reallocVar(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -1067,7 +1141,7 @@ inline int reallocVar(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -1083,9 +1157,8 @@ inline int reallocVar(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
 	*depth = 0;
     *busyNodes = malloc(*n * sizeof(int));
@@ -1096,12 +1169,15 @@ inline int reallocVar(IfAscendingParams* ifAscendingParams) {
     *endExcl = malloc(*n * sizeof(GenericList));
     *errors = malloc(*n * sizeof(int));
     (*errors)[0] = 0;
-    for (int i = 0; i < *n + 1; i++) {
-        (*busyNodes)[i] = (*nodes)[i].nbPost;
+    for (int i = 0; i <= *n; i++) {
         initList(&(*rests)[i], sizeof(int), 1);
+        (*busyNodes)[i] = (*nodes)[i].nbPost;
         (*reservationRules)[i].resList = -1;
     }
     *result = malloc(*n * sizeof(sharing));
+    for (int i = 0; i < *n - 1; i++) {
+        initList(&((*reservationLists)[i].data), sizeof(int), 1);
+    }
     for (int i = 0; i < *n; i++) {
         (*result)[i].result.result = -1;
         Node* node = &(*nodes)[i];
@@ -1114,13 +1190,12 @@ inline int reallocVar(IfAscendingParams* ifAscendingParams) {
             }
             addElement(&(*endExcl)[node->allowedPlaces[j].end], i);
         }
-        if ((*busyNodes)[i] == 0 && check_conditions(nodes, node, i)) {
+        if ((*busyNodes)[i] == 0 && check_conditions(ifAscendingParams, node)) {
             addElement(&((*rests)[0]), &i);
         }
     }
     for (int i = 0; i < *n - 1; i++) {
-        initList(&((*reservationLists)[i].data), sizeof(int), 1);
-		notChosenAnymore(ifAscendingParams, i);
+        notChosenAnymore(ifAscendingParams, i);
     }
 }
 
@@ -1139,9 +1214,9 @@ void waitForJob(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -1166,7 +1241,7 @@ void waitForJob(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -1182,9 +1257,8 @@ void waitForJob(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     (*nb_awaitingThrds)++;
     *awaitingThrds = realloc(*awaitingThrds, *nb_awaitingThrds * sizeof(int));
@@ -1210,9 +1284,9 @@ void chg_nb_process(IfAscendingParams* ifAscendingParams, int new_nb_process) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -1237,7 +1311,7 @@ void chg_nb_process(IfAscendingParams* ifAscendingParams, int new_nb_process) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -1253,9 +1327,8 @@ void chg_nb_process(IfAscendingParams* ifAscendingParams, int new_nb_process) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     *activeThrd = realloc(*activeThrd, new_nb_process * sizeof(int));
     for (int i = *nb_process; i < new_nb_process; i++) {
@@ -1267,12 +1340,12 @@ void chg_nb_process(IfAscendingParams* ifAscendingParams, int new_nb_process) {
     for (int i = 0; i < new_nb_process; i++) {
         if (!(*activeThrd)[i]) {
             (*activeThrd)[i] = 1;
+            (*threadEvents)[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
             ThreadParamsRank threadParamsRank = {
                 .rank = i,
                 .meetPoint = meetPoint,
             };
-            (*threadEvents)[i] = CreateEvent(NULL, FALSE, FALSE, NULL);
-            CloseHandle(CreateThread(NULL, 0, threadSort, &(*allParams)[i], 0, NULL));
+			CloseHandle(CreateThread(NULL, 0, threadSort, &threadParamsRank, 0, NULL));
         }
     }
 }
@@ -1292,9 +1365,9 @@ int giveJob(IfAscendingParams* ifAscendingParams) {
     int* errorThrd = ifAscendingParams->errorThrd;
     int* befUpdErr = ifAscendingParams->befUpdErr;
     int* initBefUpdErr = ifAscendingParams->initBefUpdErr;
+    int* reachedEnd = ifAscendingParams->reachedEnd;
+    int* isCompleteSorting = ifAscendingParams->isCompleteSorting;
     int notMain = ifAscendingParams->notMain;
-    int reachedEnd = ifAscendingParams->reachedEnd;
-    int isCompleteSorting = ifAscendingParams->isCompleteSorting;
     HANDLE hFile = ifAscendingParams->hFile;
     OVERLAPPED ov = ifAscendingParams->ov;
     FILE* file = ifAscendingParams->file;
@@ -1319,7 +1392,7 @@ int giveJob(IfAscendingParams* ifAscendingParams) {
     int** activeThrd = &meetPoint->activeThrd;
     int* error = &meetPoint->error;
     ThreadParams** allParams = &meetPoint->allParams;
-    int* nb_params = &meetPoint->nb_params;
+    
 
     ThreadParams* currentParam = allParams[rank];
     problemSt* problem = currentParam->problem;
@@ -1335,9 +1408,8 @@ int giveJob(IfAscendingParams* ifAscendingParams) {
     attributeSt** attributes = &problem->attributes;
     int* nb_att = &problem->nb_att;
     int* prbInd = &problem->prbInd;
-    ThreadParams** allParams = &problem->allParams;
+    ThreadParams** allWaitingParams = &problem->allWaitingParams;
     int* nb_params = &problem->nb_params;
-    int* prbInd = &problem->prbInd;
 
     (*nb_awaitingThrds)--;
 	int otherRank = (*awaitingThrds)[*nb_awaitingThrds];
@@ -1360,23 +1432,6 @@ int giveJob(IfAscendingParams* ifAscendingParams) {
 int main(int argc, char* argv[]) {
     const char* sort_info_path = "C:/Users/abarb/Documents/health/news_underground/mediaSorter/programs/data/sort_info.txt";
 
-    /*
-typedef struct {
-    const char* sort_info_path;
-    problemSt* allProblems;
-    int nb_allProblems;
-    HANDLE* mainSemaphore;
-    HANDLE* semaphore;
-    ThreadEvent* threadEvents;
-    int nb_process;
-    int* awaitingThrds;
-    int nb_awaitingThrds;
-    int* activeThrd;
-    int error;
-    ThreadParams* allParams;
-    int nb_params;
-} MeetPoint;*/
-
     MeetPoint meetPoint = {
         .sort_info_path = sort_info_path,
         .mainSemaphore = CreateSemaphore(NULL, 1, 1, NULL),
@@ -1391,13 +1446,18 @@ typedef struct {
         .allProblems = NULL,
         .error = INT_MAX,
     };
+    int nb_process = 0;
+    int stopAll;
+    int* activeThrd = NULL;
+    int nb_allProblems = 0;
 
-	// Create a new thread
-	int nb_process = 0;
-	int stopAll;
-	int* activeThrd = NULL;
-	int nb_allProblems = 0;
-    modifyFile(0, sort_info_path, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &nb_process, &meetPoint.threadEvents, NULL, &stopAll, *activeThrd, NULL, NULL, NULL, NULL, &nb_allProblems, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, &meetPoint);
+	ThreadParamsRank _threadParamsRank = {
+		.meetPoint = &meetPoint,
+	};
+    IfAscendingParams ifAscendingParams = {
+		.threadParamsRank = &_threadParamsRank,
+    };
+	modifyFile(&ifAscendingParams, &stopAll);
 
 	WaitForSingleObject(meetPoint.mainSemaphore, INFINITE);
 
